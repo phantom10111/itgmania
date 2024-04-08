@@ -60,6 +60,7 @@
 #include "XmlFileUtil.h"
 #include "Profile.h" // for replay data stuff
 #include "RageDisplay.h"
+#include "Trace.h"
 
 #include <cmath>
 #include <cstddef>
@@ -1481,6 +1482,7 @@ void ScreenGameplay::StartPlayingSong( float fMinTimeToNotes, float fMinTimeToMu
 
 	/* Make sure GAMESTATE->m_fMusicSeconds is set up. */
 	GAMESTATE->m_Position.m_fMusicSeconds = -5000;
+	TRACE->UpdateSongPositionSetCause("ScreenGameplayInit");
 	UpdateSongPosition(0);
 
 	ASSERT( GAMESTATE->m_Position.m_fMusicSeconds > -4000 ); /* make sure the "fake timer" code doesn't trigger */
@@ -1571,6 +1573,11 @@ void ScreenGameplay::UpdateSongPosition( float fDeltaTime )
 	RageTimer tm;
 	const float fSeconds = m_pSoundMusic->GetPositionSeconds( nullptr, &tm );
 	const float fAdjust = SOUND->GetFrameTimingAdjustment( fDeltaTime );
+	TRACE->UpdateSongPositionSetTimeAdjust(fSeconds, fAdjust, tm);
+	TRACE->UpdateSongPositionSetCause("ScreenGameplayUpdate");
+	if (GAMESTATE->m_pCurSong != nullptr) {
+		TRACE->UpdateSongPositionSetSong(GAMESTATE->m_pCurSong->GetSongDir().c_str());
+	}
 	GAMESTATE->UpdateSongPosition( fSeconds+fAdjust, GAMESTATE->m_pCurSong->m_SongTiming, tm+fAdjust );
 }
 

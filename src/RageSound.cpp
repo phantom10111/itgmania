@@ -26,6 +26,7 @@
 #include "RageLog.h"
 #include "PrefsManager.h"
 #include "RageSoundUtil.h"
+#include "Trace.h"
 
 #include "RageSoundReader_Extend.h"
 #include "RageSoundReader_Pan.h"
@@ -510,6 +511,7 @@ float RageSound::GetPositionSeconds( bool *bApproximate, RageTimer *pTimestamp )
 		*bApproximate = false;
 
 	/* If we're not playing, just report the static position. */
+	TRACE->UpdateSongPositionSetIsPlayingAndFramesAndSamplerate(IsPlaying(), iCurrentHardwareFrame, m_iStoppedSourceFrame, samplerate());
 	if( !IsPlaying() )
 		return m_iStoppedSourceFrame / float(samplerate());
 
@@ -520,10 +522,16 @@ float RageSound::GetPositionSeconds( bool *bApproximate, RageTimer *pTimestamp )
 		// LOG->Trace( "no data yet; %i", m_iStoppedSourceFrame );
 		if( bApproximate )
 			*bApproximate = true;
+		TRACE->UpdateSongPositionSetApproximate(true);
 		return m_iStoppedSourceFrame / float(samplerate());
 	}
 
-	int iSourceFrame = GetSourceFrameFromHardwareFrame( iCurrentHardwareFrame, bApproximate );
+	bool approx = false;
+	int iSourceFrame = GetSourceFrameFromHardwareFrame( iCurrentHardwareFrame, &approx );
+	if( bApproximate )
+		*bApproximate = approx;
+	TRACE->UpdateSongPositionSetApproximate(approx);
+	TRACE->UpdateSongPositionSetSourceFrame(iSourceFrame);
 	return iSourceFrame / float(samplerate());
 }
 

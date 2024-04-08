@@ -404,6 +404,7 @@ void ArchHooks::MountInitialFilesystems( const RString &sDirOfExecutable )
 		FILEMAN->Mount("dir", sDirOfExecutable + "/RandomMovies", "/RandomMovies");
 		FILEMAN->Mount("dir", sDirOfExecutable + "/Themes", "/Themes");
 	}
+	FILEMAN->Mount("dir", sDirOfExecutable + "/Trace", "/Trace");
 }
 
 void ArchHooks::MountUserFilesystems( const RString &sDirOfExecutable )

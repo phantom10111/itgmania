@@ -81,6 +81,7 @@ void ArchHooks::MountInitialFilesystems( const RString &sDirOfExecutable )
 		FILEMAN->Mount("dir", sDir + "/RandomMovies", "/RandomMovies");
 		FILEMAN->Mount("dir", sDir + "/Themes", "/Themes");
 	}
+	FILEMAN->Mount("dir", sDir + "/Trace", "/Trace");
 }
 
 void ArchHooks::MountUserFilesystems( const RString &sDirOfExecutable )

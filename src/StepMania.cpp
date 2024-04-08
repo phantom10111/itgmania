@@ -13,6 +13,7 @@
 #include "RageDisplay.h"
 #include "RageThreads.h"
 #include "LocalizedString.h"
+#include "Trace.h"
 
 #include "arch/ArchHooks/ArchHooks.h"
 #include "arch/LoadingWindow/LoadingWindow.h"
@@ -297,6 +298,7 @@ void ShutdownGame()
 		LIGHTSMAN->TurnOffAllLights();
 	}
 
+	SAFE_DELETE( TRACE );
 	SAFE_DELETE( SCREENMAN );
 	SAFE_DELETE( STATSMAN );
 	SAFE_DELETE( MESSAGEMAN );
@@ -1008,6 +1010,7 @@ int sm_main(int argc, char* argv[])
 	SONGMAN->UpdatePreferredSort();
 	NETWORK		= new NetworkManager;
 	STATSMAN	= new StatsManager;
+	TRACE		= new Trace;
 
 	// Initialize which courses are ranking courses here.
 	SONGMAN->UpdateRankingCourses();

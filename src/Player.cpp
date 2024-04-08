@@ -40,6 +40,7 @@
 #include "GameCommand.h"
 #include "LocalizedString.h"
 #include "AdjustSync.h"
+#include "Trace.h"
 
 #include <cmath>
 #include <cstddef>
@@ -2089,6 +2090,9 @@ void Player::Step( int col, int row, const RageTimer &tm, bool bHeld, bool bRele
 
 	float fSongBeat = m_pPlayerState->m_Position.m_fSongBeat;
 
+	TRACE->BeginJudgment((int)(m_pPlayerState->m_PlayerNumber) + 1, col, row, tm, bHeld, bRelease, m_pPlayerState->m_Position.m_fMusicSeconds,
+		m_pPlayerState->m_Position.m_LastBeatUpdate, fLastBeatUpdate, fSongBeat, fPositionSeconds, fTimeSinceStep);
+
 	if( GAMESTATE->m_pCurSong )
 	{
 		fSongBeat = GAMESTATE->m_pCurSong->m_SongTiming.GetBeatFromElapsedTime( fPositionSeconds );
@@ -2230,6 +2234,7 @@ void Player::Step( int col, int row, const RageTimer &tm, bool bHeld, bool bRele
 	int iRowOfOverlappingNoteOrRow = row;
 	if( row == -1 )
 		iRowOfOverlappingNoteOrRow = GetClosestNote( col, iSongRow, iStepSearchRows, iStepSearchRows, false );
+	TRACE->JudgmentSetFoundRow(iRowOfOverlappingNoteOrRow);
 
 	// calculate TapNoteScore
 	TapNoteScore score = TNS_None;
@@ -2261,7 +2266,11 @@ void Player::Step( int col, int row, const RageTimer &tm, bool bHeld, bool bRele
 				fTimeSinceStep, GAMESTATE->m_LastBeatUpdate.Ago()/GAMESTATE->m_SongOptions.m_fMusicRate,
 				fStepSeconds, fMusicSeconds, fNoteOffset );
 			*/
+			TRACE->JudgmentSetNoteData(fStepBeat, fStepSeconds, fCurrentMusicSeconds, fMusicSeconds, fNoteOffset);
 		}
+		else
+			TRACE->JudgmentSetNoteData(fStepBeat, fStepSeconds, 0, 0, 0);
+		TRACE->EndJudgment();
 
 		const float fSecondsFromExact = std::abs( fNoteOffset );
 
@@ -2571,6 +2580,8 @@ void Player::Step( int col, int row, const RageTimer &tm, bool bHeld, bool bRele
 			FlashGhostRow( iRowOfOverlappingNoteOrRow );
 		}
 	}
+	else
+		TRACE->EndJudgment();
 
 	if( score == TNS_None )
 		DoTapScoreNone();

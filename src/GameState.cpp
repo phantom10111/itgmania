@@ -41,6 +41,7 @@
 #include "UnlockManager.h"
 #include "ScreenManager.h"
 #include "Screen.h"
+#include "Trace.h"
 
 #include <cmath>
 #include <cstddef>
@@ -1273,8 +1274,14 @@ void GameState::UpdateSongPosition( float fPositionSeconds, const TimingData &ti
 	 * driver, like so: 13.120953,13.130975,13.130975,13.130975,13.140998,...
 	 * This causes visual stuttering of the arrows. To compensate, keep a
 	 * RageTimer since the last change. */
+	bool bNewPositionThisFrame;
+	float fEstimatedTimeSinceLastPosition = 0.f;
 	if(fPositionSeconds == m_LastPositionSeconds && !m_paused)
-		fPositionSeconds += m_LastPositionTimer.Ago();
+	{
+		fEstimatedTimeSinceLastPosition = m_LastPositionTimer.Ago();
+		fPositionSeconds += fEstimatedTimeSinceLastPosition;
+		bNewPositionThisFrame = false;
+	}
 	else
 	{
 		//LOG->Info("Time difference: %+f",
@@ -1282,9 +1289,12 @@ void GameState::UpdateSongPosition( float fPositionSeconds, const TimingData &ti
 		//);
 		m_LastPositionTimer.Touch();
 		m_LastPositionSeconds = fPositionSeconds;
+		bNewPositionThisFrame = true;
 	}
 
+	TRACE->BeginUpdateSongPosition( fPositionSeconds, timestamp, bNewPositionThisFrame, fEstimatedTimeSinceLastPosition );
 	m_Position.UpdateSongPosition( fPositionSeconds, timing, timestamp );
+	TRACE->EndUpdateSongPosition();
 
 	FOREACH_EnabledPlayer( pn )
 	{

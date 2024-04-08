@@ -14,6 +14,7 @@
 #include "LocalizedString.h"
 #include "DisplaySpec.h"
 #include "arch/ArchHooks/ArchHooks.h"
+#include "Trace.h"
 
 #include <cmath>
 #include <cstddef>
@@ -169,7 +170,7 @@ RString RageDisplay::GetStats() const
 	if( !GetFPS() )
 		s = "-- FPS\n-- av FPS\n-- VPF";
 
-	s = ssprintf( "%i FPS\n%i av FPS\n%i VPF", GetFPS(), GetCumFPS(), GetVPF() );
+	s = ssprintf( "Frame %llu\nTime %llu\n%i FPS\n%i av FPS\n%i VPF", TRACE->GetFrameNumber(), TRACE->GetFrameTimestamp(), GetFPS(), GetCumFPS(), GetVPF() );
 
 //	#if defined(_WINDOWS)
 	s += "\n"+this->GetApiDescription();

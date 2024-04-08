@@ -1,6 +1,7 @@
 # TODO: Turn Rage into a libary.
 
 list(APPEND SMDATA_RAGE_UTILS_SRC
+            "Trace.cpp"
             "RageUtil.cpp"
             "RageUtil_BackgroundLoader.cpp"
             "RageUtil_CharConversions.cpp"
@@ -8,6 +9,7 @@ list(APPEND SMDATA_RAGE_UTILS_SRC
             "RageUtil_WorkerThread.cpp")
 
 list(APPEND SMDATA_RAGE_UTILS_HPP
+            "Trace.h"
             "RageUtil.h"
             "RageUtil_AutoPtr.h" # TODO: Remove the need for this and replace
                                  # with c++11 smart pointers

@@ -20,6 +20,7 @@
 #include "LightsManager.h"
 #include "RageTimer.h"
 #include "RageInput.h"
+#include "Trace.h"
 
 #include <cmath>
 #include <vector>
@@ -267,6 +268,7 @@ void GameLoop::UpdateAllButDraw(bool bRunningFromVBLANK)
 
 	// Update our stuff
 	float fDeltaTime = g_GameplayTimer.GetDeltaTime();
+	TRACE->SetDeltaTimeNoRate(fDeltaTime);
 
 	if (g_fConstantUpdateDeltaSeconds > 0)
 		fDeltaTime = g_fConstantUpdateDeltaSeconds;
@@ -274,6 +276,7 @@ void GameLoop::UpdateAllButDraw(bool bRunningFromVBLANK)
 	CheckGameLoopTimerSkips(fDeltaTime);
 
 	fDeltaTime *= g_fUpdateRate;
+	TRACE->SetDeltaTime(fDeltaTime, g_fUpdateRate);
 
 	// Update SOUNDMAN early (before any RageSound::GetPosition calls), to flush position data.
 	SOUNDMAN->Update();
@@ -308,6 +311,7 @@ void GameLoop::RunGameLoop()
 
 	while( !ArchHooks::UserQuit() )
 	{
+		TRACE->BeginFrame();
 		if(!g_NewGame.empty())
 		{
 			DoChangeGame();
@@ -319,7 +323,9 @@ void GameLoop::RunGameLoop()
 
 		CheckFocus();
 
+		TRACE->BeforeUpdate();
 		UpdateAllButDraw(false);
+		TRACE->BeforeDevicesChanged();
 
 		if( INPUTMAN->DevicesChanged() )
 		{
@@ -330,7 +336,9 @@ void GameLoop::RunGameLoop()
 				SCREENMAN->SystemMessage( sMessage );
 		}
 
+		TRACE->BeforeDraw();
 		SCREENMAN->Draw();
+		TRACE->EndFrame();
 	}
 
 	// If we ended mid-game, finish up.
