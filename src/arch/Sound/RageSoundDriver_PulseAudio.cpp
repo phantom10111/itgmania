@@ -311,7 +311,7 @@ std::int64_t RageSoundDriver_PulseAudio::GetPosition() const
 	pa_usec_t usec;
 	if(pa_stream_get_time(m_PulseStream, &usec) < 0)
 	{
-		RageException::Throw("Pulse: pa_stream_get_time()");
+		return m_LastPosition;
 	}
 
 	std::size_t length = pa_usec_to_bytes(usec, &m_ss);
@@ -329,7 +329,7 @@ void RageSoundDriver_PulseAudio::StreamWriteCb(pa_stream *s, std::size_t length)
 	const std::size_t nbframes = length / sizeof(std::int16_t); /* we use 16-bit frames */
 	std::int64_t pos1 = m_LastPosition;
 	std::int64_t pos2 = pos1 + nbframes/2; /* Mix() position in stereo frames */
-	this->Mix( reinterpret_cast<std::int16_t*>(buf), pos2-pos1, pos1, pos2 );
+	this->Mix( reinterpret_cast<std::int16_t*>(buf), pos2-pos1, pos1, GetPosition() );
 
 	if(pa_stream_write(m_PulseStream, buf, length, nullptr, 0, PA_SEEK_RELATIVE) < 0)
 	{
