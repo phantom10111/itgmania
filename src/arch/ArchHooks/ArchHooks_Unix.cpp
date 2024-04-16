@@ -148,8 +148,9 @@ namespace
 
 clockid_t ArchHooks_Unix::GetClock()
 {
-	OpenGetTime();
-	return g_Clock;
+	//OpenGetTime();
+	//return g_Clock;
+	return CLOCK_MONOTONIC;
 }
 
 std::int64_t ArchHooks::GetMicrosecondsSinceStart( bool bAccurate )
@@ -160,8 +161,8 @@ std::int64_t ArchHooks::GetMicrosecondsSinceStart( bool bAccurate )
 	clock_gettime( g_Clock, &ts );
 
 	std::int64_t iRet = std::int64_t(ts.tv_sec) * 1000000 + std::int64_t(ts.tv_nsec)/1000;
-	if( g_Clock != CLOCK_MONOTONIC )
-		iRet = ArchHooks::FixupTimeIfBackwards( iRet );
+	//if( g_Clock != CLOCK_MONOTONIC )
+	//	iRet = ArchHooks::FixupTimeIfBackwards( iRet );
 	return iRet;
 }
 #else

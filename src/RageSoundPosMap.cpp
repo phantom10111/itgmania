@@ -11,13 +11,13 @@
 
 /* The number of frames we should keep pos_map data for.  This being too high
  * is mostly harmless; the data is small. */
-const int pos_map_backlog_frames = 100000;
+constexpr std::int64_t pos_map_backlog_frames = 100000;
 
 struct pos_map_t
 {
 	std::int64_t m_iSourceFrame;
 	std::int64_t m_iDestFrame;
-	int m_iFrames;
+	std::int64_t m_iFrames;
 	float m_fSourceToDestRatio;
 
 	pos_map_t() { m_iSourceFrame = 0; m_iDestFrame = 0; m_iFrames = 0; m_fSourceToDestRatio = 1.0f; }
@@ -62,7 +62,7 @@ void pos_map_queue::Insert( std::int64_t iSourceFrame, int iFrames, std::int64_t
 		pos_map_t &last = m_pImpl->m_Queue.back();
 		if( last.m_iSourceFrame + last.m_iFrames == iSourceFrame &&
 		    last.m_fSourceToDestRatio == fSourceToDestRatio &&
-		    llabs(last.m_iDestFrame + std::lrint(last.m_iFrames * last.m_fSourceToDestRatio) - iDestFrame) <= 1 )
+		    llabs(last.m_iDestFrame + std::llrint(last.m_iFrames * static_cast<double>(last.m_fSourceToDestRatio)) - iDestFrame) <= 1 )
 		{
 			last.m_iFrames += iFrames;
 
@@ -76,7 +76,7 @@ void pos_map_queue::Insert( std::int64_t iSourceFrame, int iFrames, std::int64_t
 				 * will be beyond the tolerance of the above iDestFrame check, and new
 				 * data will be added to a new entry.
 				 */
-				int iDeleteFrames = last.m_iFrames - pos_map_backlog_frames;
+				std::int64_t iDeleteFrames = last.m_iFrames - pos_map_backlog_frames;
 
 				pos_map_t next(last);
 
@@ -84,7 +84,7 @@ void pos_map_queue::Insert( std::int64_t iSourceFrame, int iFrames, std::int64_t
 
 				next.m_iSourceFrame += iDeleteFrames;
 				next.m_iFrames -= iDeleteFrames;
-				next.m_iDestFrame += std::lrint( iDeleteFrames * next.m_fSourceToDestRatio );
+				next.m_iDestFrame += std::llrint( iDeleteFrames * static_cast<double>(next.m_fSourceToDestRatio) );
 
 				m_pImpl->m_Queue.push_back( next );
 			}
@@ -109,7 +109,7 @@ void pos_map_impl::Cleanup()
 {
 	/* Scan backwards until we have at least pos_map_backlog_frames. */
 	std::list<pos_map_t>::iterator it = m_Queue.end();
-	int iTotalFrames = 0;
+	std::int64_t iTotalFrames = 0;
 	while( iTotalFrames < pos_map_backlog_frames )
 	{
 		if( it == m_Queue.begin() )
@@ -135,7 +135,7 @@ std::int64_t pos_map_queue::Search( std::int64_t iSourceFrame, bool *bApproximat
 
 	/* iSourceFrame is probably in pos_map.  Search to figure out what position
 	 * it maps to. */
-	std::int64_t iClosestPosition = 0, iClosestPositionDist = INT_MAX;
+	std::int64_t iClosestPosition = 0, iClosestPositionDist = INT64_MAX;
 	const pos_map_t *pClosestBlock = &*m_pImpl->m_Queue.begin(); /* print only */
 	for (pos_map_t const &pm : m_pImpl->m_Queue)
 	{
@@ -144,8 +144,8 @@ std::int64_t pos_map_queue::Search( std::int64_t iSourceFrame, bool *bApproximat
 		{
 			/* iSourceFrame lies in this block; it's an exact match.  Figure
 			 * out the exact position. */
-			int iDiff = int(iSourceFrame - pm.m_iSourceFrame);
-			iDiff = std::lrint( iDiff * pm.m_fSourceToDestRatio );
+			std::int64_t iDiff = iSourceFrame - pm.m_iSourceFrame;
+			iDiff = std::llrint( iDiff * static_cast<double>(pm.m_fSourceToDestRatio) );
 			return pm.m_iDestFrame + iDiff;
 		}
 
@@ -164,7 +164,7 @@ std::int64_t pos_map_queue::Search( std::int64_t iSourceFrame, bool *bApproximat
 		{
 			iClosestPositionDist = dist;
 			pClosestBlock = &pm;
-			iClosestPosition = pm.m_iDestFrame + std::lrint( pm.m_iFrames * pm.m_fSourceToDestRatio );
+			iClosestPosition = pm.m_iDestFrame + std::llrint( pm.m_iFrames * static_cast<double>(pm.m_fSourceToDestRatio) );
 		}
 	}
 
