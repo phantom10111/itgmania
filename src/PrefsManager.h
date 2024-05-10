@@ -343,6 +343,8 @@ public:
 	Preference<bool>	m_bShowLoadingWindow;
 	Preference<bool>	m_bPseudoLocalize;
 	Preference<bool>	m_show_theme_errors;
+	Preference<bool>    m_bDebugRenderer;
+	Preference<bool>    m_bDebugShaders;
 
 	void ReadPrefsFromIni( const IniFile &ini, const RString &sSection, bool bIsStatic );
 	void ReadGamePrefsFromIni( const RString &sIni );

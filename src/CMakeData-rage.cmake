@@ -102,8 +102,12 @@ list(APPEND SMDATA_RAGE_GRAPHICS_HPP
             "RageTextureRenderTarget.h")
 
 if(WIN32)
-  list(APPEND SMDATA_RAGE_GRAPHICS_SRC "RageDisplay_D3D.cpp")
-  list(APPEND SMDATA_RAGE_GRAPHICS_HPP "RageDisplay_D3D.h")
+  list(APPEND SMDATA_RAGE_GRAPHICS_SRC
+              "RageDisplay_D3D.cpp"
+              "RageDisplay_D3D11.cpp")
+  list(APPEND SMDATA_RAGE_GRAPHICS_HPP
+              "RageDisplay_D3D.h"
+              "RageDisplay_D3D11.h")
 elseif(LINUX)
   if(WITH_GLES2)
     list(APPEND SMDATA_RAGE_GRAPHICS_SRC "RageDisplay_GLES2.cpp")

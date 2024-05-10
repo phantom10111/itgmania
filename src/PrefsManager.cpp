@@ -321,6 +321,8 @@ PrefsManager::PrefsManager() :
 	m_bShowLoadingWindow		( "ShowLoadingWindow",	true ),
 	m_bPseudoLocalize		( "PseudoLocalize",	false ),
 	m_show_theme_errors		( "ShowThemeErrors",	false ),
+	m_bDebugRenderer		( "DebugRenderer", false),
+	m_bDebugShaders			( "DebugRenderer", false),
 	m_sAdditionalSongFolders	( "AdditionalSongFolders",		"", nullptr, PreferenceType::Deprecated ),
 	m_sAdditionalCourseFolders	( "AdditionalCourseFolders",		"", nullptr, PreferenceType::Deprecated ),
 	m_sAdditionalFolders		( "AdditionalFolders",			"", nullptr, PreferenceType::Deprecated )
