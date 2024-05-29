@@ -6,7 +6,6 @@
 #include "RageDisplay.h"
 
 #include <wrl/client.h>
-#include <dxgi.h>
 #include <d3d11_1.h>
 
 #include <cstdint>
@@ -92,11 +91,12 @@ protected:
 
 	void SendCurrentMatrices();
 
+	HMODULE m_dxgiDebugModule = nullptr;
+	Microsoft::WRL::ComPtr<IDXGIFactory2> m_pDxgiFactory;
 	Microsoft::WRL::ComPtr<ID3D11Device> m_pDevice;
 	Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_pDeviceContext;
 	Microsoft::WRL::ComPtr<ID3DUserDefinedAnnotation> m_pUserDefinedAnnotation;
-	Microsoft::WRL::ComPtr<IDXGIFactory> m_pDxgiFactory;
-	Microsoft::WRL::ComPtr<IDXGISwapChain> m_pSwapchain;
+	Microsoft::WRL::ComPtr<IDXGISwapChain1> m_pSwapchain;
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pRenderTarget;
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;

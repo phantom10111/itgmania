@@ -21,6 +21,10 @@
 	#pragma comment(lib, "d3d11.lib")
 #endif
 
+#include <dxgidebug.h>
+#include <dxgi1_6.h>
+#include <d3d11sdklayers.h>
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -188,11 +192,76 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	const bool bDebugRenderer = PREFSMAN->m_bDebugRenderer;
 #endif
 
-	const UINT flags = bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0;
-	D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
-	HRESULT hr = D3D11CreateDevice(
-		nullptr,
-		D3D_DRIVER_TYPE_HARDWARE,
+	if (bDebugRenderer && !m_dxgiDebugModule)
+	{
+		// Loading the library activates the DXGI Debug layer, no other calls are necessary
+		m_dxgiDebugModule = LoadLibraryEx("DXGIDebug.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+
+		if (m_dxgiDebugModule)
+		{
+// Only setup breakpoints in debug configuration
+#ifdef DEBUG
+			const auto pDXGIGetDebugInterface = reinterpret_cast<decltype(&DXGIGetDebugInterface)>(GetProcAddress(m_dxgiDebugModule, "DXGIGetDebugInterface"));
+
+			Microsoft::WRL::ComPtr<IDXGIInfoQueue> pDxgiInfoQueue;
+			HRESULT hr = pDXGIGetDebugInterface(IID_PPV_ARGS(&pDxgiInfoQueue));
+			ASSERT(SUCCEEDED(hr));
+
+			pDxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+			pDxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, TRUE);
+			pDxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_WARNING, TRUE);
+#endif
+		}
+		else
+		{
+			LOG->Warn("RageDisplay_D3D11: Debug device requested but unable to load DXGIDebug.dll\nWindows SDK must be installed to take full advantage of various graphics debug layers");
+		}
+	}
+
+	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&m_pDxgiFactory));
+	ASSERT(SUCCEEDED(hr));
+
+	bool bTearingAllowed = false;
+
+	Microsoft::WRL::ComPtr<IDXGIFactory5> pDxgiFactory5;
+	hr = m_pDxgiFactory.As(&pDxgiFactory5);
+	if (hr != E_NOINTERFACE)
+	{
+		ASSERT(SUCCEEDED(hr));
+
+		BOOL allowTearing;
+		hr = pDxgiFactory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
+		ASSERT(SUCCEEDED(hr));
+
+		bTearingAllowed = allowTearing;
+	}
+
+	Microsoft::WRL::ComPtr<IDXGIFactory6> pDxgiFactory6;
+	hr = m_pDxgiFactory.As(&pDxgiFactory6);
+	if (hr != E_NOINTERFACE)
+	{
+		ASSERT(SUCCEEDED(hr));
+
+		pDxgiFactory6->EnumAdapterByGpuPreference();
+	}
+
+	for (UINT i = 0; ; ++i)
+	{
+		Microsoft::WRL::ComPtr<IDXGIAdapter1> pDxgiAdapter;
+		hr = m_pDxgiFactory->EnumAdapters1(i, &pDxgiAdapter);
+
+		if (hr == DXGI_ERROR_NOT_FOUND)
+		{
+			break;
+		}
+	}
+
+	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0);
+	const D3D_DRIVER_TYPE driverType = pAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
+	hr = D3D11CreateDevice(
+		pAdapter.Get(),
+		driverType,
 		nullptr,
 		flags,
 		&featureLevel,
@@ -202,26 +271,7 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		nullptr,
 		&m_pDeviceContext);
 
-	if (!SUCCEEDED(hr))
-	{
-		// Try again with a lower feature level in case 11.1 is not supported.
-		// We can't try both feature levels by passing a feature level array,
-		// because if 11.1 isn't supported and we pass it, D3D11CreateDevice()
-		// will fail with an invalid arg error, defeating the whole purpose of
-		// the array. Thanks Microsoft!
-		featureLevel = D3D_FEATURE_LEVEL_11_0;
-		hr = D3D11CreateDevice(
-			nullptr,
-			D3D_DRIVER_TYPE_HARDWARE,
-			nullptr,
-			flags,
-			&featureLevel,
-			1,
-			D3D11_SDK_VERSION,
-			&m_pDevice,
-			nullptr,
-			&m_pDeviceContext);
-
+	if (!SUCCEEDED(hr)) {
 		if (!SUCCEEDED(hr))
 		{
 			LOG->Trace("D3D11CreateDevice failed");
@@ -229,17 +279,21 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		}
 	}
 
-	m_pDevice->QueryInterface(IID_PPV_ARGS(&m_pUserDefinedAnnotation));
+	// Only setup breakpoints in debug configuration
+#ifdef DEBUG
+	Microsoft::WRL::ComPtr<ID3D11InfoQueue> pInfoQueue;
+	hr = m_pDevice.As(&pInfoQueue);
+	if (SUCCEEDED(hr))
+	{
+		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, TRUE);
+		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, TRUE);
+		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_WARNING, TRUE);
+	}
+#endif
 
-	Microsoft::WRL::ComPtr<IDXGIDevice> pDxgiDevice;
-	hr = m_pDevice->QueryInterface(IID_PPV_ARGS(&pDxgiDevice));
-	ASSERT(SUCCEEDED(hr));
+	ASSERT(hr == E_NOINTERFACE);
 
-	hr = pDxgiDevice->GetParent(IID_PPV_ARGS(&m_pDxgiFactory));
-	ASSERT(SUCCEEDED(hr));
-
-	Microsoft::WRL::ComPtr<IDXGIAdapter> pAdapter;
-	hr = pDxgiDevice->GetAdapter(&pAdapter);
+	hr = m_pDeviceContext.As(&m_pUserDefinedAnnotation);
 	ASSERT(SUCCEEDED(hr));
 
 	DXGI_ADAPTER_DESC adapterDesc;
@@ -300,6 +354,14 @@ RageDisplay_D3D11::~RageDisplay_D3D11()
 	LOG->Trace( "RageDisplay_D3D11::~RageDisplay()" );
 
 	GraphicsWindow::Shutdown();
+
+	// Apparently swapchain can't be released while fullscreen, so switch it to windowed mode
+	if(m_pSwapchain)
+		m_pSwapchain->SetFullscreenState(FALSE, nullptr);
+
+	// TODO how to unload this module after all ComPtrs?
+	if (m_dxgiDebugModule)
+		FreeLibrary(m_dxgiDebugModule);
 }
 
 void RageDisplay_D3D11::GetDisplaySpecs( DisplaySpecs &out ) const
@@ -399,32 +461,35 @@ RString RageDisplay_D3D11::TryVideoMode( const VideoModeParams &p, bool &bNewDev
 	 * causes all other windows on the system to be resized to the new resolution. */
 	GraphicsWindow::CreateGraphicsWindow( p );
 
-	DXGI_SWAP_CHAIN_DESC swapchainDesc = {
-		{
-			p.width,
-			p.height,
-			{p.rate, 1}, // DXGI_RATIONAL {Numerator, Denominator}
-			format,
-			DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE,
-			DXGI_MODE_SCALING_STRETCHED
-		},
+	// TODO can we actually make use of mode switch? Need to call IDXGISwapChain::ResizeBuffers()
+	const UINT swapchainFlags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | (bAllowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
+	DXGI_SWAP_CHAIN_DESC1 swapchainDesc = {
+		p.width,
+		p.height,
+		format,
+		FALSE, // Stereo
 		{1, 0}, // DXGI_SAMPLE_DESC {Count, Quality}
 		DXGI_USAGE_RENDER_TARGET_OUTPUT,
-		3 /* TODO is this enough? */, // Buffer count
-		GraphicsWindow::GetHwnd(),
-		p.windowed,
+		2 /* TODO is this enough? */, // Buffer count
+		DXGI_SCALING_STRETCH,
 		DXGI_SWAP_EFFECT_FLIP_DISCARD,
-		// TODO can we actually make use of mode switch? Need to call IDXGISwapChain::ResizeBuffers()
-		// TODO how to handle DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING? See also IDXGIFactory5::CheckFeatureSupport
-		DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH
+		DXGI_ALPHA_MODE_IGNORE,
+		swapchainFlags
 	};
 
-	HRESULT hr = m_pDxgiFactory->CreateSwapChain(m_pDevice.Get(), &swapchainDesc, &m_pSwapchain);
+	const DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreenDesc = {
+		{p.rate, 1}, // DXGI_RATIONAL {Numerator, Denominator}
+		DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE,
+		DXGI_MODE_SCALING_STRETCHED,
+		p.windowed
+	};
+
+	HRESULT hr = m_pDxgiFactory->CreateSwapChainForHwnd(m_pDevice.Get(), GraphicsWindow::GetHwnd(), &swapchainDesc, &fullscreenDesc, nullptr, &m_pSwapchain);
 	if( !SUCCEEDED(hr) )
 	{
-		// DXGI_SWAP_EFFECT_FLIP_DISCARD is supported starting in Win 10 so try again with an older mode
+		// DXGI_SWAP_EFFECT_FLIP_DISCARD is supported starting in Win 10 so try again with an older mode in case it's not available
 		swapchainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-		hr = m_pDxgiFactory->CreateSwapChain(m_pDevice.Get(), &swapchainDesc, &m_pSwapchain);
+		hr = m_pDxgiFactory->CreateSwapChainForHwnd(m_pDevice.Get(), GraphicsWindow::GetHwnd(), &swapchainDesc, &fullscreenDesc, nullptr, &m_pSwapchain);
 
 		if( !SUCCEEDED(hr) )
 		{
