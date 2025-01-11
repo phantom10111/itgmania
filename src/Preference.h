@@ -57,8 +57,7 @@ public:
 	static void SavePrefsToNode( XNode* pNode );
 	static void ReadAllDefaultsFromNode( const XNode* pNode );
 
-	RString GetName() { return m_sName; }
-	bool IsImmutable() { return m_bImmutable; }
+	bool IsImmutable() const { return m_bImmutable; }
 private:
 	RString	m_sName;
 	bool m_bDoNotWrite;
