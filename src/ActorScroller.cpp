@@ -32,8 +32,6 @@ ActorScroller::ActorScroller()
 	m_bLoop = false;
 	m_bWrap = false;
 	m_bFastCatchup = false;
-	m_bFunctionDependsOnPositionOffset = true;
-	m_bFunctionDependsOnItemIndex = true;
 	m_fPauseCountdownSeconds = 0;
 	m_fQuantizePixels = 0;
 
@@ -60,12 +58,6 @@ void ActorScroller::Load2()
 void ActorScroller::SetTransformFromReference( const LuaReference &ref )
 {
 	m_exprTransformFunction.SetFromReference( ref );
-
-	// Probe to find which of the parameters are used.
-#define GP(a,b)	m_exprTransformFunction.GetTransformCached( a, b, 2 )
-	m_bFunctionDependsOnPositionOffset = (GP(0,0) != GP(1,0)) && (GP(0,1) != GP(1,1));
-	m_bFunctionDependsOnItemIndex = (GP(0,0) != GP(0,1)) && (GP(1,0) != GP(1,1));
-	m_exprTransformFunction.ClearCache();
 }
 
 void ActorScroller::SetTransformFromExpression( const RString &sTransformFunction )
@@ -146,10 +138,6 @@ void ActorScroller::LoadFromNode( const XNode *pNode )
 			SetTransformFromReference( ref );
 	}
 	LUA->Release( L );
-
-	int iSubdivisions = 1;
-	if( pNode->GetAttrValue("Subdivisions", iSubdivisions) )
-		ActorScroller::SetNumSubdivisions( iSubdivisions );
 
 	bool bUseMask = false;
 	pNode->GetAttrValue( "UseMask", bUseMask );
@@ -255,10 +243,10 @@ void ActorScroller::PositionItemsAndDrawPrimitives( bool bDrawPrimitives )
 		float fPositionFullyOffScreenTop = -(fNumItemsToDraw)/2.f;
 		float fPositionFullyOffScreenBottom = (fNumItemsToDraw)/2.f;
 
-		m_exprTransformFunction.TransformItemCached( m_quadMask, fPositionFullyOffScreenTop, -1, m_iNumItems );
+		m_exprTransformFunction.TransformItem( m_quadMask, fPositionFullyOffScreenTop, -1, m_iNumItems );
 		if( bDrawPrimitives )	m_quadMask.Draw();
 
-		m_exprTransformFunction.TransformItemCached( m_quadMask, fPositionFullyOffScreenBottom, m_iNumItems, m_iNumItems );
+		m_exprTransformFunction.TransformItem( m_quadMask, fPositionFullyOffScreenBottom, m_iNumItems, m_iNumItems );
 		if( bDrawPrimitives )	m_quadMask.Draw();
 	}
 
@@ -293,16 +281,7 @@ void ActorScroller::PositionItemsAndDrawPrimitives( bool bDrawPrimitives )
 		else if( iIndex < 0 || iIndex >= (int)m_SubActors.size() )
 			continue;
 
-		// Optimization: Zero out unused parameters so that they don't create new,
-		// unnecessary  entries in the position cache. On scrollers with lots of
-		// items, especially with Subdivisions > 1, m_exprTransformFunction uses
-		// too much memory.
-		if( !m_bFunctionDependsOnPositionOffset )
-			fPosition = 0;
-		if( !m_bFunctionDependsOnItemIndex )
-			iItem = 0;
-
-		m_exprTransformFunction.TransformItemCached( *m_SubActors[iIndex], fPosition, iItem, m_iNumItems );
+		m_exprTransformFunction.TransformItem( *m_SubActors[iIndex], fPosition, iItem, m_iNumItems );
 		if( bDrawPrimitives )
 		{
 			if( m_bDrawByZPosition )
@@ -344,7 +323,7 @@ public:
 	static int GetSecondsPauseBetweenItems( T* p, lua_State *L )	{ lua_pushnumber( L, p->GetSecondsPauseBetweenItems() ); return 1; }
 	static int SetSecondsPauseBetweenItems( T* p, lua_State *L )	{ p->SetSecondsPauseBetweenItems(FArg(1)); COMMON_RETURN_SELF; }
 	static int SetPauseCountdownSeconds( T* p, lua_State *L )	{ p->SetPauseCountdownSeconds(FArg(1)); COMMON_RETURN_SELF; }
-	static int SetNumSubdivisions( T* p, lua_State *L )		{ p->SetNumSubdivisions(IArg(1)); COMMON_RETURN_SELF; }
+	static int SetNumSubdivisions( T* p, lua_State *L )		{ /* No-op but kept here for compatibility */ COMMON_RETURN_SELF; }
 	static int ScrollThroughAllItems( T* p, lua_State *L )		{ p->ScrollThroughAllItems(); COMMON_RETURN_SELF; }
 	static int ScrollWithPadding( T* p, lua_State *L )		{ p->ScrollWithPadding(FArg(1),FArg(2)); COMMON_RETURN_SELF; }
 	static int SetFastCatchup( T* p, lua_State *L )			{ p->SetFastCatchup(BArg(1)); COMMON_RETURN_SELF; }

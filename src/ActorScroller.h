@@ -43,7 +43,6 @@ public:
 	void SetSecondsPerItem( float fSeconds )		{ m_fSecondsPerItem = fSeconds; }
 	void SetSecondsPauseBetweenItems( float fSeconds )		{ m_fSecondsPauseBetweenItems = fSeconds; }
 	float GetSecondsPauseBetweenItems()		{ return m_fSecondsPauseBetweenItems; }
-	void SetNumSubdivisions( int iNumSubdivisions )		{ m_exprTransformFunction.SetNumSubdivisions( iNumSubdivisions ); }
 	float GetSecondsForCompleteScrollThrough() const;
 	float GetSecondsToDestination() const;
 	int GetNumItems() const						{ return m_iNumItems; }
@@ -77,8 +76,6 @@ protected:
 	bool	m_bLoop; 
 	bool	m_bWrap; 
 	bool	m_bFastCatchup; 
-	bool	m_bFunctionDependsOnPositionOffset;
-	bool	m_bFunctionDependsOnItemIndex;
 	float	m_fPauseCountdownSeconds;
 	float	m_fQuantizePixels;
 

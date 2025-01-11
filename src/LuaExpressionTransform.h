@@ -18,30 +18,13 @@ public:
 	~LuaExpressionTransform();
 
 	void SetFromReference( const LuaReference &ref );
-	void SetNumSubdivisions( int iNumSubdivisions ) { ASSERT( iNumSubdivisions > 0 ); m_iNumSubdivisions = iNumSubdivisions; }
 
-	void TransformItemCached( Actor &a, float fPositionOffsetFromCenter, int iItemIndex, int iNumItems );
-	void TransformItemDirect( Actor &a, float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const;
-	const Actor::TweenState &GetTransformCached( float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const;
-	void ClearCache() { m_mapPositionToTweenStateCache.clear(); }
+	void TransformItem( Actor &a, float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const;
+	const Actor::TweenState &GetTransform( float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const;
 
 protected:
 
 	LuaReference m_exprTransformFunction;	// params: self,offset,itemIndex,numItems
-	int m_iNumSubdivisions;	// 1 == one evaluation per position
-	struct PositionOffsetAndItemIndex
-	{
-		float fPositionOffsetFromCenter;
-		int iItemIndex;
-
-		bool operator<( const PositionOffsetAndItemIndex &other ) const
-		{
-			if( fPositionOffsetFromCenter != other.fPositionOffsetFromCenter )
-				return fPositionOffsetFromCenter < other.fPositionOffsetFromCenter;
-			return iItemIndex < other.iItemIndex;
-		}
-	};
-	mutable std::map<PositionOffsetAndItemIndex,Actor::TweenState> m_mapPositionToTweenStateCache;
 };
 
 #endif

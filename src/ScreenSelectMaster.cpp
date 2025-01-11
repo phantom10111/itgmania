@@ -72,8 +72,6 @@ void ScreenSelectMaster::Init()
 	SCROLLER_SECONDS_PER_ITEM.Load( m_sName, "ScrollerSecondsPerItem" );
 	SCROLLER_NUM_ITEMS_TO_DRAW.Load( m_sName, "ScrollerNumItemsToDraw" );
 	SCROLLER_TRANSFORM.Load( m_sName, "ScrollerTransform" );
-	//SCROLLER_TWEEN.Load( m_sName, "ScrollerTween" );
-	SCROLLER_SUBDIVISIONS.Load( m_sName, "ScrollerSubdivisions" );
 	DEFAULT_CHOICE.Load( m_sName, "DefaultChoice" );
 	DOUBLE_PRESS_TO_SELECT.Load(m_sName,"DoublePressToSelect");
 
@@ -242,7 +240,6 @@ void ScreenSelectMaster::Init()
 			m_Scroller[p].Load2();
 			m_Scroller[p].SetTransformFromReference( SCROLLER_TRANSFORM );
 			m_Scroller[p].SetSecondsPerItem( SCROLLER_SECONDS_PER_ITEM );
-			m_Scroller[p].SetNumSubdivisions( SCROLLER_SUBDIVISIONS );
 			m_Scroller[p].SetName( "Scroller"+PLAYER_APPEND_NO_SPACE(p) );
 			LOAD_ALL_COMMANDS_AND_SET_XY( m_Scroller[p] );
 			this->AddChild( &m_Scroller[p] );

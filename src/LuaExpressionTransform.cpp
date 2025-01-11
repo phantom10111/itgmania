@@ -5,7 +5,6 @@
 
 LuaExpressionTransform::LuaExpressionTransform()
 {
-	m_iNumSubdivisions = 1;
 }
 
 LuaExpressionTransform::~LuaExpressionTransform()
@@ -17,8 +16,9 @@ void LuaExpressionTransform::SetFromReference( const LuaReference &ref )
 	m_exprTransformFunction = ref;
 }
 
-void LuaExpressionTransform::TransformItemDirect( Actor &a, float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const
+void LuaExpressionTransform::TransformItem( Actor &a, float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const
 {
+	a.DestTweenState().Init();
 	Lua *L = LUA->Get();
 	m_exprTransformFunction.PushSelf( L );
 	ASSERT( !lua_isnil(L, -1) );
@@ -31,37 +31,13 @@ void LuaExpressionTransform::TransformItemDirect( Actor &a, float fPositionOffse
 	LUA->Release(L);
 }
 
-const Actor::TweenState &LuaExpressionTransform::GetTransformCached( float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const
+const Actor::TweenState &LuaExpressionTransform::GetTransform( float fPositionOffsetFromCenter, int iItemIndex, int iNumItems ) const
 {
-	PositionOffsetAndItemIndex key = { fPositionOffsetFromCenter, iItemIndex };
-
-	std::map<PositionOffsetAndItemIndex,Actor::TweenState>::const_iterator iter = m_mapPositionToTweenStateCache.find( key );
-	if( iter != m_mapPositionToTweenStateCache.end() )
-		return iter->second;
-
-	Actor a;
-	TransformItemDirect( a, fPositionOffsetFromCenter, iItemIndex, iNumItems );
-	return m_mapPositionToTweenStateCache[key] = a.DestTweenState();
-}
-
-void LuaExpressionTransform::TransformItemCached( Actor &a, float fPositionOffsetFromCenter, int iItemIndex, int iNumItems )
-{
-	float fInterval = 1.0f / m_iNumSubdivisions;
-	float fFloor = QuantizeDown( fPositionOffsetFromCenter, fInterval );
-	float fCeil = QuantizeUp( fPositionOffsetFromCenter, fInterval );
-
-	if( fFloor == fCeil )
-	{
-		a.DestTweenState() = GetTransformCached( fCeil, iItemIndex, iNumItems );
-	}
-	else
-	{
-		const Actor::TweenState &tsFloor = GetTransformCached( fFloor, iItemIndex, iNumItems );
-		const Actor::TweenState &tsCeil = GetTransformCached( fCeil, iItemIndex, iNumItems );
-
-		float fPercentTowardCeil = SCALE( fPositionOffsetFromCenter, fFloor, fCeil, 0.0f, 1.0f );
-		Actor::TweenState::MakeWeightedAverage( a.DestTweenState(), tsFloor, tsCeil, fPercentTowardCeil );
-	}
+	// This can be called many times per frame so allocating an Actor each time can be a huge performance hit.
+	// Make the actor static to offset this a little bit.
+	static Actor a;
+	TransformItem( a, fPositionOffsetFromCenter, iItemIndex, iNumItems );
+	return a.DestTweenState();
 }
 
 

@@ -79,8 +79,6 @@ protected:
 	ThemeMetric<float>	SCROLLER_SECONDS_PER_ITEM;
 	ThemeMetric<float>	SCROLLER_NUM_ITEMS_TO_DRAW;
 	ThemeMetric<LuaReference> SCROLLER_TRANSFORM;
-	//ThemeMetric<LuaReference> SCROLLER_TWEEN;
-	ThemeMetric<int>	SCROLLER_SUBDIVISIONS;
 	ThemeMetric<RString>	DEFAULT_CHOICE;
 
 	std::map<int, int> m_mapCurrentChoiceToNextChoice[NUM_MenuDir];

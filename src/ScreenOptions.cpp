@@ -257,7 +257,6 @@ void ScreenOptions::InitMenu( const std::vector<OptionRowHandler*> &vHands )
 /* Call when option rows have been re-initialized. */
 void ScreenOptions::RestartOptions()
 {
-	m_exprRowPositionTransformFunction.ClearCache();
 	std::vector<PlayerNumber> vpns;
 	FOREACH_HumanPlayer( p )
 		vpns.push_back( p );
@@ -681,7 +680,7 @@ void ScreenOptions::PositionRows( bool bTween )
 		else if( i >= first_end && i < second_start )	fPos = ((int)NUM_ROWS_SHOWN)/2-0.5f;
 		else if( i >= second_end )			fPos = ((int)NUM_ROWS_SHOWN)-0.5f;
 
-		Actor::TweenState tsDestination = m_exprRowPositionTransformFunction.GetTransformCached( fPos, i, std::min( (int)Rows.size(), (int)NUM_ROWS_SHOWN ) );
+		Actor::TweenState tsDestination = m_exprRowPositionTransformFunction.GetTransform( fPos, i, std::min( (int)Rows.size(), (int)NUM_ROWS_SHOWN ) );
 
 		bool bHidden =
 			i < first_start ||
