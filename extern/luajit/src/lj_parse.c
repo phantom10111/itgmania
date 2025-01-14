@@ -1992,6 +1992,109 @@ static void expr_primary(LexState *ls, ExpDesc *v)
   }
 }
 
+static void parse_cmd_args(LexState *ls, ExpDesc *f)
+{
+  /* cmd_funcargs -> [ ',' expr_list ] */
+  FuncState *fs = ls->fs;
+  ExpDesc args;
+  BCIns ins;
+  BCReg base;
+  BCLine line = ls->linenumber;
+  if (ls->tok == ')' || ls->tok == ';') {  /* arg list is empty */
+    args.k = VVOID;
+  } else if (ls->tok == ',') {
+    lj_lex_next(ls);
+    expr_list(ls, &args);
+    if (args.k == VCALL)  /* f(a, b, g()) or f(a, b, ...). */
+      setbc_b(bcptr(fs, &args), 0);  /* Pass on multiple results. */
+  } else {
+    err_token(ls, ')');
+    return;
+  }
+  lj_assertFS(f->k == VNONRELOC, "bad expr type %d", f->k);
+  base = f->u.s.info;  /* Base register for call. */
+  if (args.k == VCALL) {
+    ins = BCINS_ABC(BC_CALLM, base, 2, args.u.s.aux - base - 1 - ls->fr2);
+  } else {
+    if (args.k != VVOID)
+      expr_tonextreg(fs, &args);
+    ins = BCINS_ABC(BC_CALL, base, 2, fs->freereg - base - ls->fr2);
+  }
+  expr_init(f, VCALL, bcemit_INS(fs, ins));
+  f->u.s.aux = base;
+  fs->bcbase[fs->pc - 1].line = line;
+  fs->freereg = base+1;  /* Leave one result by default. */
+}
+
+static void parse_cmd_body(LexState *ls, ExpDesc *e)
+{
+  /* cmd_body -> [ [ ';' ] Name cmd_args } */
+  FuncState *fs = ls->fs;
+  while(1) {
+    switch (ls->tok) {
+      case ')':
+        return;
+      case ';':
+        lj_lex_next(ls);
+        continue;
+      default: {
+        ExpDesc key;
+        expr_init(e, VLOCAL, 0);
+        e->u.s.aux = fs->varmap[0];
+        expr_str(ls, &key);
+        bcemit_method(fs, e, &key);
+        parse_cmd_args(ls, e);
+        setbc_b(bcptr(fs, e), 1);  /* No results from this function call. */
+      }
+    }
+  }
+}
+
+static BCReg cmd_add_params(LexState *ls)
+{
+  FuncState *fs = ls->fs;
+  var_new_lit(ls, 0, "self");
+  var_add(ls, 1);
+  fs->flags |= PROTO_VARARG;
+  lj_assertFS(fs->nactvar == 1, "bad regalloc");
+  bcreg_reserve(fs, 1);
+  return 1;
+}
+
+static void parse_cmd(LexState *ls, ExpDesc *e, BCLine line)
+{
+  /* cmd -> STRING */
+  FuncState fs, *pfs = ls->fs;
+  FuncScope bl;
+  GCproto *pt;
+  ptrdiff_t oldbase = pfs->bcbase - ls->bcstack;
+  fs_init(ls, &fs);
+  fscope_begin(&fs, &bl, 0);
+  fs.linedefined = line;
+  fs.numparams = cmd_add_params(ls);
+  fs.bcbase = pfs->bcbase + pfs->pc;
+  fs.bclim = pfs->bclim - pfs->pc;
+  bcemit_AD(&fs, BC_FUNCF, 0, 0);  /* Placeholder. */
+  lex_check(ls, '(');
+  parse_cmd_body(ls, e);
+  if (ls->tok != ')') lex_match(ls, ')', TK_cmd, line);
+  pt = fs_finish(ls, (ls->lastline = ls->linenumber));
+  pfs->bcbase = ls->bcstack + oldbase;  /* May have been reallocated. */
+  pfs->bclim = (BCPos)(ls->sizebcstack - oldbase);
+  /* Store new prototype in the constant array of the parent. */
+  expr_init(e, VRELOCABLE,
+            bcemit_AD(pfs, BC_FNEW, 0, const_gc(pfs, obj2gco(pt), LJ_TPROTO)));
+#if LJ_HASFFI
+  pfs->flags |= (fs.flags & PROTO_FFI);
+#endif
+  if (!(pfs->flags & PROTO_CHILD)) {
+    if (pfs->flags & PROTO_HAS_RETURN)
+      pfs->flags |= PROTO_FIXUP_RETURN;
+    pfs->flags |= PROTO_CHILD;
+  }
+  lj_lex_next(ls);
+}
+
 /* Parse simple expression. */
 static void expr_simple(LexState *ls, ExpDesc *v)
 {
@@ -2029,6 +2132,10 @@ static void expr_simple(LexState *ls, ExpDesc *v)
   case TK_function:
     lj_lex_next(ls);
     parse_body(ls, v, 0, ls->linenumber);
+    return;
+  case TK_cmd:
+    lj_lex_next(ls);
+    parse_cmd(ls, v, ls->linenumber);
     return;
   default:
     expr_primary(ls, v);
