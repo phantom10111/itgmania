@@ -1,4 +1,5 @@
-include(CMakeProject-lua.cmake)
+#include(CMakeProject-lua.cmake)
+include(CMakeProject-luajit.cmake)
 include(CMakeProject-glew.cmake)
 include(CMakeProject-json.cmake)
 include(CMakeProject-mad.cmake)
