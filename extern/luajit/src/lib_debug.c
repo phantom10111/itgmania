@@ -367,7 +367,7 @@ LJLIB_CF(debug_debug)
     if (fgets(buffer, sizeof(buffer), stdin) == 0 ||
 	strcmp(buffer, "cont\n") == 0)
       return 0;
-    if (luaL_loadbuffer(L, buffer, strlen(buffer), "=(debug command)") ||
+    if (luaL_loadbufferx(L, buffer, strlen(buffer), "=(debug command)", "t") ||
 	lua_pcall(L, 0, 0, 0)) {
       const char *s = lua_tostring(L, -1);
       fputs(s ? s : "(error object is not a string)", stderr);
