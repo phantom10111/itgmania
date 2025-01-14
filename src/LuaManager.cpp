@@ -790,7 +790,7 @@ bool LuaHelpers::RunScriptFile( const RString &sFile )
 bool LuaHelpers::LoadScript( Lua *L, const RString &sScript, const RString &sName, RString &sError )
 {
 	// load string
-	int ret = luaL_loadbuffer( L, sScript.data(), sScript.size(), sName );
+	int ret = luaL_loadbufferx( L, sScript.data(), sScript.size(), sName, "t" );
 	if( ret )
 	{
 		LuaHelpers::Pop( L, sError );
