@@ -92,6 +92,12 @@ namespace LuaHelpers
 	template<> void Push<RString>( lua_State *L, const RString &Object ) { lua_pushlstring( L, Object.data(), Object.size() ); }
 	template<> void Push<std::string>( lua_State *L, std::string const& object ) { lua_pushlstring( L, object.data(), object.size() ); }
 
+	void PushType( lua_State *L, int iOffset )
+	{
+		if( !luaL_callmeta(L, iOffset, "__type") )
+			lua_pushstring( L, luaL_typename(L, iOffset) );
+	}
+
 	template<> bool FromStack<bool>( Lua *L, bool &Object, int iOffset ) { Object = !!lua_toboolean( L, iOffset ); return true; }
 	template<> bool FromStack<float>( Lua *L, float &Object, int iOffset ) { Object = (float)lua_tonumber( L, iOffset ); return true; }
 	template<> bool FromStack<int>( Lua *L, int &Object, int iOffset ) { Object = lua_tointeger( L, iOffset ); return true; }
@@ -988,7 +994,7 @@ void LuaHelpers::ParseCommandList( Lua *L, const RString &sCommands, const RStri
 int LuaHelpers::TypeError( Lua *L, int iArgNo, const char *szName )
 {
 	RString sType;
-	luaL_pushtype( L, iArgNo );
+	LuaHelpers::PushType( L, iArgNo );
 	LuaHelpers::Pop( L, sType );
 
 	lua_Debug debug;

@@ -8,16 +8,12 @@ class RageMutex;
 class XNode;
 class LuaReference;
 
-#ifndef _MSC_VER
 extern "C"
 {
-#endif
-#include "../extern/lua-5.1/src/lua.h"
-#include "../extern/lua-5.1/src/lualib.h"
-#include "../extern/lua-5.1/src/lauxlib.h"
-#ifndef _MSC_VER
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
 }
-#endif
 
 // For Dialog::Result
 #include "arch/Dialog/Dialog.h"
@@ -123,6 +119,8 @@ namespace LuaHelpers
 
 	template<class T>
 	void Push( lua_State *L, const T &Object );
+
+	void PushType( lua_State *L, int iOffset );
 
 	template<class T>
 	bool FromStack( lua_State *L, T &Object, int iOffset );

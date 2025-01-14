@@ -5,14 +5,10 @@
 #include "RageUtil.h"
 #include <memory>
 
-#ifndef _MSC_VER
 extern "C"
 {
-#endif
-#include "../extern/lua-5.1/src/lua.h"
-#ifndef _MSC_VER
+#include "lua.h"
 }
-#endif
 
 /** @brief A general foreach loop for enumerators, going up to a max value. */
 #define FOREACH_ENUM_N( e, max, var )	for( e var=(e)0; var<max; enum_add<e>( var, +1 ) )

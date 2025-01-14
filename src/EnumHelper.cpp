@@ -56,7 +56,7 @@ int CheckEnum( lua_State *L, LuaReference &table, int iPos, int iInvalid, const 
 		else
 		{
 			/* We didn't get a string.  Show the type. */
-			luaL_pushtype( L, iPos );
+			LuaHelpers::PushType( L, iPos );
 			LuaHelpers::Pop( L, sGot );
 		}
 		LuaHelpers::Push( L, ssprintf("Expected %s; got %s", szType, sGot.c_str() ) );

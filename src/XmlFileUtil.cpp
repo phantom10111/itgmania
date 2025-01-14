@@ -689,8 +689,7 @@ namespace
 					/* If this number is an integer, and between [1,iLen], then
 					 * we added this one already above. */
 					lua_Number f = lua_tonumber( L, -1 );
-					int i;
-					lua_number2int(i, f);
+					int i = static_cast<int>(f);
 					if( i >= 1 && i <= iLen && float(i) == f )
 						continue;
 				}
