@@ -1,22 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 project(luajit-buildvm)
 
-include(luajit-compile-definitions.cmake)
+include(../luajit-cmake/luajit-compile-definitions.cmake)
 
 set(LUAJIT_ARCH "" CACHE STRING "Target arch for luajit")
 set(LUAJIT_OS "" CACHE STRING "Target OS for luajit")
-set(LUAJIT_RELVER_FILE "" CACHE FILEPATH "luajit version file")
+set(LUAJIT_GENERATED_INCLUDE_DIR "" CACHE PATH "luajit generated headers directory")
+set(LUAJIT_MINILUA "" CACHE FILEPATH "luajit minilua executable")
 
 set(LUAJIT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../luajit")
 
-add_executable(minilua "${LUAJIT_DIR}/src/host/minilua.c")
+add_executable(minilua IMPORTED)
+set_property(TARGET minilua PROPERTY IMPORTED_LOCATION "${LUAJIT_MINILUA}")
 
-if(MSVC)
-  target_compile_definitions(minilua PRIVATE "_CRT_SECURE_NO_WARNINGS")
-endif(MSVC)
-
-set(LUAJIT_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated")
-set(LUAJIT_GENERATED_HOST_INCLUDE_DIR "${LUAJIT_GENERATED_INCLUDE_DIR}/host")
+set(LUAJIT_GENERATED_HOST_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated/host")
 
 set(LUAJIT_DYNASM_DASC "${LUAJIT_DIR}/src/vm_${LUAJIT_ARCH}.dasc")
 
@@ -26,15 +23,6 @@ if("${LUAJIT_OS}" EQUAL "WINDOWS")
 else()
   list(APPEND LUAJIT_DASM_FLAGS -D JIT -D ENDIAN_LE -D FPU -D P64)
 endif()
-
-add_custom_command(
-  OUTPUT "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit.h"
-  COMMAND minilua ARGS "${LUAJIT_DIR}/src/host/genversion.lua" "${LUAJIT_DIR}/src/luajit_rolling.h" "${LUAJIT_RELVER_FILE}" "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit.h"
-  DEPENDS
-    minilua
-    "${LUAJIT_DIR}/src/host/genversion.lua"
-    "${LUAJIT_DIR}/src/luajit_rolling.h"
-    "${LUAJIT_RELVER_FILE}")
 
 add_custom_command(
   OUTPUT "${LUAJIT_GENERATED_HOST_INCLUDE_DIR}/buildvm_arch.h"
@@ -47,7 +35,7 @@ add_custom_command(
     "${LUAJIT_DIR}/src/lua.h"
     "${LUAJIT_DIR}/src/luaconf.h")
 
-add_custom_target(generate_buildvm_files DEPENDS "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit.h" "${LUAJIT_GENERATED_HOST_INCLUDE_DIR}/buildvm_arch.h")
+add_custom_target(generate_buildvm_files DEPENDS "${LUAJIT_GENERATED_HOST_INCLUDE_DIR}/buildvm_arch.h")
 
 set(LUAJIT_BUILDVM_SRC
   "${LUAJIT_DIR}/src/host/buildvm.c"
@@ -63,4 +51,4 @@ target_include_directories(buildvm PRIVATE "${LUAJIT_DIR}/src" "${LUAJIT_GENERAT
 
 luajit_compile_definitions(buildvm)
 
-install(TARGETS minilua buildvm)
+install(TARGETS buildvm)

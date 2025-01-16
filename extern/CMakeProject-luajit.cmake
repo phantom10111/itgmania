@@ -1,5 +1,5 @@
 include(ExternalProject)
-include(luajit-buildvm/luajit-compile-definitions.cmake)
+include(luajit-cmake/luajit-compile-definitions.cmake)
 
 #TODO
 if(MSVC)
@@ -12,30 +12,24 @@ endif()
 
 set(LUAJIT_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit/generated")
 
-configure_file("luajit-buildvm/luajit_relver.txt.in" "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit_relver.txt")
+configure_file("luajit-cmake/luajit_relver.txt.in" "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit_relver.txt")
 
+# TODO when not crosscompiling, don't use ExternalProject_Add() since it sucks due to always trying to rebuild
 ExternalProject_Add(
-    luajit_buildvm_project
-    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/luajit-buildvm"
-    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/build"
-    INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install"
+    luajit_minilua_project
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/luajit-minilua"
+    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit-minilua/build"
+    INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit-minilua/install"
     BUILD_IN_SOURCE OFF
     CMAKE_ARGS
         "-DCMAKE_SYSTEM_NAME=${DCMAKE_HOST_SYSTEM_NAME}"
         "-DCMAKE_SYSTEM_PROCESSOR=${DCMAKE_HOST_SYSTEM_PROCESSOR}"
-        "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install"
-        "-DLUAJIT_ARCH=${LUAJIT_ARCH}"
-        "-DLUAJIT_OS=${LUAJIT_OS}"
-        "-DLUAJIT_RELVER_FILE=${LUAJIT_GENERATED_INCLUDE_DIR}/luajit_relver.txt"
-)
+        "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/luajit-minilua/install"
+    BUILD_ALWAYS ON)
 
 add_executable(minilua IMPORTED)
-set_property(TARGET minilua PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install/bin/minilua${CMAKE_EXECUTABLE_SUFFIX}")
-add_dependencies(minilua luajit_buildvm_project)
-
-add_executable(buildvm IMPORTED)
-set_property(TARGET buildvm PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install/bin/buildvm${CMAKE_EXECUTABLE_SUFFIX}")
-add_dependencies(buildvm luajit_buildvm_project)
+set_property(TARGET minilua PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/luajit-minilua/install/bin/minilua${CMAKE_EXECUTABLE_SUFFIX}")
+add_dependencies(minilua luajit_minilua_project)
 
 add_custom_command(
     OUTPUT "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit.h"
@@ -51,6 +45,30 @@ add_custom_command(
         "luajit/src/host/genversion.lua"
         "luajit/src/luajit_rolling.h"
         "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit_relver.txt")
+
+add_custom_target(generate_luajit_h DEPENDS "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit.h")
+
+ExternalProject_Add(
+    luajit_buildvm_project
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/luajit-buildvm"
+    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/build"
+    INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install"
+    BUILD_IN_SOURCE OFF
+    CMAKE_ARGS
+        "-DCMAKE_SYSTEM_NAME=${DCMAKE_HOST_SYSTEM_NAME}"
+        "-DCMAKE_SYSTEM_PROCESSOR=${DCMAKE_HOST_SYSTEM_PROCESSOR}"
+        "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install"
+        "-DLUAJIT_ARCH=${LUAJIT_ARCH}"
+        "-DLUAJIT_OS=${LUAJIT_OS}"
+        "-DLUAJIT_GENERATED_INCLUDE_DIR=${LUAJIT_GENERATED_INCLUDE_DIR}"
+        "-DLUAJIT_MINILUA=${CMAKE_CURRENT_BINARY_DIR}/luajit-minilua/install/bin/minilua${CMAKE_EXECUTABLE_SUFFIX}"
+    BUILD_ALWAYS ON)
+
+add_dependencies(luajit_buildvm_project minilua generate_luajit_h)
+
+add_executable(buildvm IMPORTED)
+set_property(TARGET buildvm PROPERTY IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/luajit-buildvm/install/bin/buildvm${CMAKE_EXECUTABLE_SUFFIX}")
+add_dependencies(buildvm luajit_buildvm_project)
 
 set(LUAJIT_LIB_SRC
     "luajit/src/lib_base.c"
@@ -96,8 +114,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS buildvm ${LUAJIT_LIB_SRC})
 
-add_custom_target(generate_luajit_files DEPENDS
-    "${LUAJIT_GENERATED_INCLUDE_DIR}/luajit.h"
+add_custom_target(generate_luajit_definitions DEPENDS
     "${LUAJIT_GENERATED_INCLUDE_DIR}/lj_bcdef.h"
     "${LUAJIT_GENERATED_INCLUDE_DIR}/lj_ffdef.h"
     "${LUAJIT_GENERATED_INCLUDE_DIR}/lj_libdef.h"
@@ -241,7 +258,7 @@ source_group("" FILES ${LUAJIT_SRC})
 source_group("" FILES ${LUAJIT_H})
 
 add_library(lua-5.1 STATIC ${LUAJIT_SRC} ${LUAJIT_H})
-add_dependencies(lua-5.1 generate_luajit_files)
+add_dependencies(lua-5.1 generate_luajit_h generate_luajit_definitions)
 
 set_property(TARGET lua-5.1 PROPERTY FOLDER "External Libraries")
 
