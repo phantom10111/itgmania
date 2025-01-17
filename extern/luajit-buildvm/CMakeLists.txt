@@ -28,10 +28,23 @@ endif()
 set(LUAJIT_DYNASM_DASC "${LUAJIT_DIR}/src/vm_${LUAJIT_ARCH}.dasc")
 
 #TODO
-if("${LUAJIT_OS}" EQUAL "WINDOWS")
+if(MSVC)
+  #this works for x64 or arm64
   list(APPEND LUAJIT_DASM_FLAGS -D WIN -D JIT -D ENDIAN_LE -D FPU -D P64)
+  #for x86
+  #list(APPEND LUAJIT_DASM_FLAGS -D WIN -D JIT -D ENDIAN_LE -D FPU)
 else()
-  list(APPEND LUAJIT_DASM_FLAGS -D JIT -D ENDIAN_LE -D FPU -D P64)
+  #TODO LUAJIT_TARGET LUAJIT_OS and other defines should probably be taken from luajit-compile-definitions.cmake
+  execute_process(
+    COMMAND "${CMAKE_C_COMPILER}"
+      ${CMAKE_C_FLAGS}
+      "-DLUAJIT_TARGET=LUAJIT_ARCH_${LUAJIT_ARCH}"
+      "-DLUAJIT_OS=LUAJIT_OS_${LUAJIT_OS}"
+      -E
+      "${LUAJIT_DIR}/src/lj_arch.h"
+      -dM
+    OUTPUT_VARIABLE LUAJIT_TARGET_TESTARCH
+    COMMAND_ERROR_IS_FATAL ANY)
 endif()
 
 add_custom_command(
