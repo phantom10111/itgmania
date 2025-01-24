@@ -374,7 +374,8 @@ static DWORD WINAPI MainExceptionHandler( LPVOID lpParameter )
 		 * loop through all displays it could have been to restore the video mode. */
 		while (EnumDisplayDevices(NULL, deviceIter++, &dd, 0))
 		{
-			while (EnumDisplaySettingsEx(dd.DeviceName, ENUM_CURRENT_SETTINGS, &devmode, 0))
+			DWORD settingsIter = 0;
+			while (EnumDisplaySettingsEx(dd.DeviceName, settingsIter++, &devmode, 0))
 			{
 				if (deviceModeIsValid(devmode))
 				{
