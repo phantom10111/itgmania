@@ -16,6 +16,10 @@
 #include "PrefsManager.h" // for g_bAutoRestart
 #include "RestartProgram.h"
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 // WARNING: This is called from crash-time conditions!  No malloc() or new!!!
 
 #define malloc not_allowed_here
@@ -568,15 +572,17 @@ void CrashHandler::do_backtrace( const void **buf, std::size_t size,
 [[noreturn]]
 static void debug_crash()
 {
-//	__try {
-#if defined(__MSC_VER)
-		__asm xor ebx,ebx
-		__asm mov eax,dword ptr [ebx]
-//		__asm mov dword ptr [ebx],eax
-//		__asm lock add dword ptr cs:[00000000h], 12345678h
+	__try {
+#if defined(_MSC_VER)
+		__ud2();
+#else
+		// This is silly but should generate a SEH exception
+		volatile int* pNull = 0;
+		*pNull;
 #endif
-//	} __except( CrashHandler::ExceptionHandler((EXCEPTION_POINTERS*)_exception_info()) ) {
-//	}
+	}
+	__except (CrashHandler::ExceptionHandler((EXCEPTION_POINTERS*)_exception_info())) {
+	}
 }
 
 /* Get a stack trace of the current thread and the specified thread.
