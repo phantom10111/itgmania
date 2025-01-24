@@ -286,7 +286,7 @@ void DSoundBuf::SetVolume( float fVolume )
 
 	if( fVolume == 0 )
 		fVolume = 0.001f;		// fix log10(0) == -INF
-	float iVolumeLog2 = std::log10(fVolume) / std::log10(2); /* vol log 2 */
+	float iVolumeLog2 = std::log10(fVolume) / std::log10(2.f); /* vol log 2 */
 
 	/* Volume is a multiplier; SetVolume wants attenuation in hundredths of a decibel. */
 	const int iNewVolume = std::max( int(1000 * iVolumeLog2), DSBVOLUME_MIN );

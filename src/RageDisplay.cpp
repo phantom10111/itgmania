@@ -205,7 +205,7 @@ void RageDisplay::DrawPolyLine(const RageSpriteVertex &p1, const RageSpriteVerte
 	// soh cah toa strikes strikes again!
 	float opp = p2.p.x - p1.p.x;
 	float adj = p2.p.y - p1.p.y;
-	float hyp = std::pow(opp*opp + adj*adj, 0.5f);
+	float hyp = std::sqrt(opp*opp + adj*adj);
 
 	float lsin = opp/hyp;
 	float lcos = adj/hyp;

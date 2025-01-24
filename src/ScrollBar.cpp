@@ -63,8 +63,8 @@ void ScrollBar::SetPercentage( float fCenterPercent, float fSizePercent )
 	float fEndPercent = fCenterPercent + fSizePercent;
 
 	// make sure the percent numbers are between 0 and 1
-	fStartPercent	= std::fmod( fStartPercent+1, 1 );
-	fEndPercent	= std::fmod( fEndPercent+1, 1 );
+	fStartPercent	= std::fmod( fStartPercent+1, 1.f );
+	fEndPercent	= std::fmod( fEndPercent+1, 1.f );
 
 	CHECKPOINT_M("Percentages set.");
 	float fPartTopY[2], fPartBottomY[2];

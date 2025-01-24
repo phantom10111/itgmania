@@ -7,7 +7,6 @@
 #include "RageSoundMixBuffer.h"
 #include "RageSoundReader.h"
 
-#include <cmath>
 #include <cstdint>
 
 static const int channels = 2;
@@ -512,14 +511,14 @@ std::int64_t RageSoundDriver::ClampHardwareFrame( std::int64_t iHardwareFrame ) 
 
 				//try to hand hold the user if their audio driver is possibly bad
 				int p = 21; // save some time, assume the buffer has at least a minute of cd quality audio -- 2^21
-				while (std::pow(2,p) < m_iMaxHardwareFrame)
+				while ((1 << p) < m_iMaxHardwareFrame)
 				{
 					if (p == 31)  break; //do not want to go beyond signed DWORD size
 					p++;
 				}
 
 				LOG->Trace("RageSoundDriver: driver returned a lesser position (%d < %d). If this is a recurrent driver problem with your sound card and not an underrun, try setting the preference RageSoundSampleCountClamp to %d",
-					(int)iHardwareFrame, (int)m_iMaxHardwareFrame, (int)std::floor(std::pow(2.0, p)));
+					(int)iHardwareFrame, (int)m_iMaxHardwareFrame, 1 << p);
 				last.Touch();
 			}
 

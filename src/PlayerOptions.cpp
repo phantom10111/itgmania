@@ -1401,7 +1401,7 @@ float PlayerOptions::GetReversePercentForColumn( int iCol ) const
 		f += m_fScrolls[SCROLL_CROSS];
 
 	if( f > 2 )
-		f = std::fmod( f, 2 );
+		f = std::fmod( f, 2.f );
 	if( f > 1 )
 		f = SCALE( f, 1.f, 2.f, 1.f, 0.f );
 	return f;

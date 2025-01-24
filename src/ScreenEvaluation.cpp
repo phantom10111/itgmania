@@ -147,7 +147,7 @@ void ScreenEvaluation::Init()
 
 		for( float f = 0; f < 100.0f; f += 1.0f )
 		{
-			float fP1 = std::fmod(f/100*4+.3f,1);
+			float fP1 = std::fmod(f/100*4+.3f,1.f);
 			ss.m_player[PLAYER_1].SetLifeRecordAt( fP1, f );
 			ss.m_player[PLAYER_2].SetLifeRecordAt( 1-fP1, f );
 		}

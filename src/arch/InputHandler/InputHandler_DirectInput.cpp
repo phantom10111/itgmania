@@ -20,7 +20,6 @@
 #pragma comment(lib, "xinput.lib")
 #endif
 
-#include <cmath>
 #include <XInput.h>
 #include <WbemIdl.h>
 #include <OleAuto.h>
@@ -785,7 +784,7 @@ void InputHandler_DInput::UpdateXInput( XIDevice &device, const RageTimer &tm )
 		// map joysticks
 		float lx = 0.f;
 		float ly = 0.f;
-		if (std::sqrt(std::pow(state.Gamepad.sThumbLX, 2) + std::pow(state.Gamepad.sThumbLY, 2)) > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)
+		if (state.Gamepad.sThumbLX * state.Gamepad.sThumbLX + state.Gamepad.sThumbLY * state.Gamepad.sThumbLY > XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE * XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE)
 		{
 			lx = SCALE(state.Gamepad.sThumbLX + 0.f, XINPUT_GAMEPAD_THUMB_MIN + 0.f, XINPUT_GAMEPAD_THUMB_MAX + 0.f, -1.0f, 1.0f);
 			ly = SCALE(state.Gamepad.sThumbLY + 0.f, XINPUT_GAMEPAD_THUMB_MIN + 0.f, XINPUT_GAMEPAD_THUMB_MAX + 0.f, -1.0f, 1.0f);
@@ -797,7 +796,7 @@ void InputHandler_DInput::UpdateXInput( XIDevice &device, const RageTimer &tm )
 
 		float rx = 0.f;
 		float ry = 0.f;
-		if (std::sqrt(std::pow(state.Gamepad.sThumbRX, 2) + std::pow(state.Gamepad.sThumbRY, 2)) > XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE)
+		if (state.Gamepad.sThumbRX * state.Gamepad.sThumbRX + state.Gamepad.sThumbRY * state.Gamepad.sThumbRY > XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE * XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE)
 		{
 			rx = SCALE(state.Gamepad.sThumbRX + 0.f, XINPUT_GAMEPAD_THUMB_MIN + 0.f, XINPUT_GAMEPAD_THUMB_MAX + 0.f, -1.0f, 1.0f);
 			ry = SCALE(state.Gamepad.sThumbRY + 0.f, XINPUT_GAMEPAD_THUMB_MIN + 0.f, XINPUT_GAMEPAD_THUMB_MAX + 0.f, -1.0f, 1.0f);

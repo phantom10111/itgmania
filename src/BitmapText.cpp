@@ -616,7 +616,7 @@ void BitmapText::UpdateBaseZoom()
 		} \
 		if(dimension != 0) \
 		{ \
-			const float zoom= std::fmin(1, dimension_max / dimension); \
+			const float zoom= std::fmin(1.f, dimension_max / dimension); \
 			base_zoom_set(zoom); \
 		} \
 	}

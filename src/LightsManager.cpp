@@ -208,7 +208,7 @@ void LightsManager::Update( float fDeltaTime )
 	if( m_LightsMode == LIGHTSMODE_TEST_AUTO_CYCLE )
 	{
 		m_fTestAutoCycleCurrentIndex += fDeltaTime;
-		m_fTestAutoCycleCurrentIndex = std::fmod( m_fTestAutoCycleCurrentIndex, NUM_CabinetLight*100 );
+		m_fTestAutoCycleCurrentIndex = std::fmod( m_fTestAutoCycleCurrentIndex, static_cast<float>(NUM_CabinetLight*100) );
 	}
 
 	switch( m_LightsMode )

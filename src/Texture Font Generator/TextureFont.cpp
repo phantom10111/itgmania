@@ -293,7 +293,7 @@ void TextureFont::FormatFontPage( int iPage, HDC hDC )
 	pPage->m_iFrameWidth = std::ceil( pPage->m_iFrameWidth /(double)iDimensionMultiple ) * iDimensionMultiple;
 	pPage->m_iFrameHeight = std::ceil( pPage->m_iFrameHeight /(double)iDimensionMultiple ) * iDimensionMultiple;
 
-	pPage->m_iNumFramesX = std::ceil( std::pow( (float) Desc.chars.size(), 0.5f ) );
+	pPage->m_iNumFramesX = std::ceil( std::sqrt( (float) Desc.chars.size() ) );
 	pPage->m_iNumFramesY = std::ceil( (float) Desc.chars.size() / pPage->m_iNumFramesX );
 
 	pPage->Create( pPage->m_iNumFramesX*pPage->m_iFrameWidth, pPage->m_iNumFramesY*pPage->m_iFrameHeight );

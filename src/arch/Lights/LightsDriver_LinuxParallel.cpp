@@ -9,8 +9,6 @@
 #include "InputMapper.h"
 #include "Game.h"
 
-#include <cmath>
-
 // xxx: don't hardcode the port address. -aj
 static const int PORT_ADDRESS = 0x378;
 static const bool SCREEN_DEBUG = false;
@@ -48,7 +46,7 @@ void LightsDriver_LinuxParallel::Set( const LightsState *ls )
 	{
 		s += ls->m_bCabinetLights[cl] ? '1' : '0';
 		if ( ls->m_bCabinetLights[cl] )
-			output += std::pow((double)2,i);
+			output |= 1 << i;
 		i++;
 	}
 	s += "\n";
