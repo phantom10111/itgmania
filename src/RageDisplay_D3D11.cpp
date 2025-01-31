@@ -221,8 +221,6 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&m_pDxgiFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	bool bTearingAllowed = false;
-
 	Microsoft::WRL::ComPtr<IDXGIFactory5> pDxgiFactory5;
 	hr = m_pDxgiFactory.As(&pDxgiFactory5);
 	if (hr != E_NOINTERFACE)
@@ -233,8 +231,13 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		hr = pDxgiFactory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
 		ASSERT(SUCCEEDED(hr));
 
-		bTearingAllowed = allowTearing;
+		// TODO add a preference for this
+		m_bAllowTearing = allowTearing;
 	}
+	else
+		m_bAllowTearing = false;
+
+	Microsoft::WRL::ComPtr<IDXGIAdapter1> pDxgiAdapter;
 
 	Microsoft::WRL::ComPtr<IDXGIFactory6> pDxgiFactory6;
 	hr = m_pDxgiFactory.As(&pDxgiFactory6);
@@ -242,25 +245,28 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	{
 		ASSERT(SUCCEEDED(hr));
 
-		pDxgiFactory6->EnumAdapterByGpuPreference();
-	}
-
-	for (UINT i = 0; ; ++i)
-	{
-		Microsoft::WRL::ComPtr<IDXGIAdapter1> pDxgiAdapter;
-		hr = m_pDxgiFactory->EnumAdapters1(i, &pDxgiAdapter);
-
-		if (hr == DXGI_ERROR_NOT_FOUND)
+		UINT i = 0;
+		while(true)
 		{
+			// TODO add preference for user to specify intergrted graphics (DXGI_GPU_PREFERENCE_MINIMUM_POWER) here
+			hr = pDxgiFactory6->EnumAdapterByGpuPreference(i++, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&pDxgiAdapter));
+
+			if (hr == DXGI_ERROR_NOT_FOUND)
+			{
+				break;
+			}
+
+			// TODO the loop makes no sense if we're just always gonna use the first adapter
+			ASSERT(SUCCEEDED(hr));
 			break;
 		}
 	}
 
 	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0);
-	const D3D_DRIVER_TYPE driverType = pAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+	const D3D_DRIVER_TYPE driverType = pDxgiAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
 	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
 	hr = D3D11CreateDevice(
-		pAdapter.Get(),
+		pDxgiAdapter.Get(),
 		driverType,
 		nullptr,
 		flags,
@@ -272,32 +278,40 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		&m_pDeviceContext);
 
 	if (!SUCCEEDED(hr)) {
-		if (!SUCCEEDED(hr))
-		{
-			LOG->Trace("D3D11CreateDevice failed");
-			return "D3D11CreateDevice failed";
-		}
+		LOG->Trace("D3D11CreateDevice failed");
+		return "D3D11CreateDevice failed";
 	}
+
+	Microsoft::WRL::ComPtr<IDXGIDevice> pDxgiDevice;
+	hr = m_pDevice.As(&pDxgiDevice);
+	ASSERT(SUCCEEDED(hr));
+
+	Microsoft::WRL::ComPtr<IDXGIAdapter> pDxgiAdapterInUse;
+	hr = pDxgiDevice->GetAdapter(&pDxgiAdapterInUse);
+	ASSERT(SUCCEEDED(hr));
+
+	hr = pDxgiAdapterInUse.As(&m_pDxgiAdapter);
+	ASSERT(SUCCEEDED(hr));
 
 	// Only setup breakpoints in debug configuration
 #ifdef DEBUG
 	Microsoft::WRL::ComPtr<ID3D11InfoQueue> pInfoQueue;
 	hr = m_pDevice.As(&pInfoQueue);
-	if (SUCCEEDED(hr))
+	if (hr != E_NOINTERFACE)
 	{
+		ASSERT(SUCCEEDED(hr));
+
 		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_CORRUPTION, TRUE);
 		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_ERROR, TRUE);
 		pInfoQueue->SetBreakOnSeverity(D3D11_MESSAGE_SEVERITY_WARNING, TRUE);
 	}
 #endif
 
-	ASSERT(hr == E_NOINTERFACE);
-
 	hr = m_pDeviceContext.As(&m_pUserDefinedAnnotation);
 	ASSERT(SUCCEEDED(hr));
 
 	DXGI_ADAPTER_DESC adapterDesc;
-	hr = pAdapter->GetDesc(&adapterDesc);
+	hr = pDxgiAdapter->GetDesc(&adapterDesc);
 	ASSERT(SUCCEEDED(hr));
 
 	LOG->Trace(
@@ -320,15 +334,15 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	for (UINT i = 0; ; ++i)
 	{
 		Microsoft::WRL::ComPtr<IDXGIOutput> pOutput;
-		hr = pAdapter->EnumOutputs(i, &pOutput);
+		hr = pDxgiAdapter->EnumOutputs(i, &pOutput);
 
 		if (hr == DXGI_ERROR_NOT_FOUND)
 			break;
-		ASSERT(SUCCEEDED(result));
+		ASSERT(SUCCEEDED(hr));
 
 		DXGI_OUTPUT_DESC outputDesc;
 		hr = pOutput->GetDesc(&outputDesc);
-		ASSERT(SUCCEEDED(result));
+		ASSERT(SUCCEEDED(hr));
 
 		LOG->Trace("  Output %u (%ls):", i, outputDesc.DeviceName);
 
@@ -342,6 +356,7 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	}
 #endif
 
+	//TODO fix comment
 	/* Up until now, all we've done is set up g_pd3d and do some queries. Now,
 	 * actually initialize the window. Do this after as many error conditions as
 	 * possible, because if we have to shut it down again we'll flash a window briefly. */
@@ -367,6 +382,28 @@ RageDisplay_D3D11::~RageDisplay_D3D11()
 void RageDisplay_D3D11::GetDisplaySpecs( DisplaySpecs &out ) const
 {
 	out.clear();
+
+	// TODO should we handle more than one output?
+	Microsoft::WRL::ComPtr<IDXGIOutput> pDxgiOutput;
+	HRESULT hr = m_pDxgiAdapter->EnumOutputs(0, &pDxgiOutput);
+	ASSERT(SUCCEEDED(hr));
+
+	UINT numModes;
+	hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, nullptr);
+	ASSERT(SUCCEEDED(hr));
+
+	std::unique_ptr<DXGI_MODE_DESC[]> pModes;
+	do {
+		pModes = std::make_unique_for_overwrite<DXGI_MODE_DESC[]>(numModes);
+		hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, pModes.get());
+	} while (hr == DXGI_ERROR_MORE_DATA);
+	ASSERT(SUCCEEDED(hr));
+
+	for (UINT i = 0; i < numModes; ++i)
+	{
+		
+	}
+
 	int iCnt = g_pd3d->GetAdapterModeCount( D3DADAPTER_DEFAULT, g_DefaultAdapterFormat );
 
 	std::set<DisplayMode> modes;
@@ -462,7 +499,7 @@ RString RageDisplay_D3D11::TryVideoMode( const VideoModeParams &p, bool &bNewDev
 	GraphicsWindow::CreateGraphicsWindow( p );
 
 	// TODO can we actually make use of mode switch? Need to call IDXGISwapChain::ResizeBuffers()
-	const UINT swapchainFlags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | (bAllowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
+	const UINT swapchainFlags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | (m_bAllowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
 	DXGI_SWAP_CHAIN_DESC1 swapchainDesc = {
 		p.width,
 		p.height,
@@ -477,6 +514,7 @@ RString RageDisplay_D3D11::TryVideoMode( const VideoModeParams &p, bool &bNewDev
 		swapchainFlags
 	};
 
+	//TODO perhaps we should use values from DXGI_MODE_DESC here
 	const DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreenDesc = {
 		{p.rate, 1}, // DXGI_RATIONAL {Numerator, Denominator}
 		DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE,

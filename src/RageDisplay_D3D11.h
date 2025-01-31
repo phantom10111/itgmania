@@ -91,8 +91,11 @@ protected:
 
 	void SendCurrentMatrices();
 
+	bool m_bAllowTearing = false;
+
 	HMODULE m_dxgiDebugModule = nullptr;
 	Microsoft::WRL::ComPtr<IDXGIFactory2> m_pDxgiFactory;
+	Microsoft::WRL::ComPtr<IDXGIAdapter1> m_pDxgiAdapter;
 	Microsoft::WRL::ComPtr<ID3D11Device> m_pDevice;
 	Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_pDeviceContext;
 	Microsoft::WRL::ComPtr<ID3DUserDefinedAnnotation> m_pUserDefinedAnnotation;
