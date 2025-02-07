@@ -88,10 +88,6 @@ static void SetPalette( std::uintptr_t TexResource )
 	g_pd3dDevice->SetCurrentTexturePalette( iPalIndex );
 }
 
-#define D3DFVF_RageSpriteVertex (D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_DIFFUSE|D3DFVF_TEX1)
-#define D3DFVF_RageModelVertex (D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1)
-
-
 static const RageDisplay::RagePixelFormatDesc PIXEL_FORMAT_DESC[NUM_RagePixelFormat] = {
 	{
 		/* R8G8B8A8 */
@@ -176,7 +172,10 @@ const RageDisplay::RagePixelFormatDesc *RageDisplay_D3D11::GetPixelFormatDesc(Ra
 
 RageDisplay_D3D11::RageDisplay_D3D11()
 {
+	SetBlendMode(BLEND_NORMAL);
 
+	m_bDepthStateChanged = true;
+	m_DepthStencilDesc.DepthEnable = FALSE;
 }
 
 RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnacceleratedRenderer */ )
@@ -381,59 +380,42 @@ RageDisplay_D3D11::~RageDisplay_D3D11()
 
 void RageDisplay_D3D11::GetDisplaySpecs( DisplaySpecs &out ) const
 {
-	out.clear();
-
-	// TODO should we handle more than one output?
-	Microsoft::WRL::ComPtr<IDXGIOutput> pDxgiOutput;
-	HRESULT hr = m_pDxgiAdapter->EnumOutputs(0, &pDxgiOutput);
-	ASSERT(SUCCEEDED(hr));
-
-	UINT numModes;
-	hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, nullptr);
-	ASSERT(SUCCEEDED(hr));
-
-	std::unique_ptr<DXGI_MODE_DESC[]> pModes;
-	do {
-		pModes = std::make_unique_for_overwrite<DXGI_MODE_DESC[]>(numModes);
-		hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, pModes.get());
-	} while (hr == DXGI_ERROR_MORE_DATA);
-	ASSERT(SUCCEEDED(hr));
-
-	for (UINT i = 0; i < numModes; ++i)
+	UINT outputNum = 0;
+	while (true)
 	{
-		
-	}
+		Microsoft::WRL::ComPtr<IDXGIOutput> pDxgiOutput;
+		HRESULT hr = m_pDxgiAdapter->EnumOutputs(outputNum++, &pDxgiOutput);
+		if (hr == DXGI_ERROR_NOT_FOUND)
+			break;
+		ASSERT(SUCCEEDED(hr));
 
-	int iCnt = g_pd3d->GetAdapterModeCount( D3DADAPTER_DEFAULT, g_DefaultAdapterFormat );
+		UINT numModes;
+		hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, nullptr);
+		ASSERT(SUCCEEDED(hr));
 
-	std::set<DisplayMode> modes;
-	D3DDISPLAYMODE mode;
-	for ( int i = 0; i < iCnt; ++i )
-	{
-		g_pd3d->EnumAdapterModes( D3DADAPTER_DEFAULT, g_DefaultAdapterFormat, i, &mode );
-		modes.insert( { mode.Width, mode.Height, static_cast<double> (mode.RefreshRate) } );
-	}
+		std::unique_ptr<DXGI_MODE_DESC[]> pModes;
+		do {
+			pModes = std::make_unique_for_overwrite<DXGI_MODE_DESC[]>(numModes);
+			hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, pModes.get());
+		} while (hr == DXGI_ERROR_MORE_DATA);
+		ASSERT(SUCCEEDED(hr));
 
-	// Get the current display mode
-	if ( g_pd3d->GetAdapterDisplayMode( D3DADAPTER_DEFAULT, &mode ) == D3D_OK )
-	{
-		D3DADAPTER_IDENTIFIER9 ID;
-		g_pd3d->GetAdapterIdentifier( D3DADAPTER_DEFAULT, 0, &ID );
-		DisplayMode active = { mode.Width, mode.Height, static_cast<double> (mode.RefreshRate) };
-		RectI bounds( 0, 0, active.width, active.height );
-		out.insert( DisplaySpec( "", "Fullscreen", modes, active, bounds ) );
-	}
-	else
-	{
-		LOG->Warn( "Could not find active mode for default D3D adapter" );
-		if ( !modes.empty() )
-		{
-			const DisplayMode &m = *modes.begin();
-			RectI bounds( 0, 0, m.width, m.height );
-			out.insert( DisplaySpec( "", "Fullscreen", modes, m, bounds ) );
-		}
-	}
+		std::set<DisplayMode> modes;
+		for (UINT i = 0; i < numModes; ++i)
+			modes.emplace(DisplayMode{ pModes[i].Width, pModes[i].Height, static_cast<double>(pModes[i].RefreshRate.Numerator) / pModes[i].RefreshRate.Denominator });
 
+		DXGI_OUTPUT_DESC outputDesc;
+		hr = pDxgiOutput->GetDesc(&outputDesc);
+		ASSERT(SUCCEEDED(hr));
+
+		//TODO do I need to handle DPI here? https://stackoverflow.com/questions/70976583/get-real-screen-resolution-using-win32-api
+		MONITORINFO monitorInfo;
+		monitorInfo.cbSize = sizeof(monitorInfo);
+		ASSERT(GetMonitorInfo(outputDesc.Monitor, &monitorInfo));
+
+		// TODO which mode is the currently active one?
+		out.emplace(DisplaySpec{ "HMONITOR", ssprintf("%p", outputDesc.Monitor), std::move(modes), *modes.begin(), RectI{monitorInfo.rcMonitor.left, monitorInfo.rcMonitor.top, monitorInfo.rcMonitor.right, monitorInfo.rcMonitor.bottom} });
+	}
 }
 
 DXGI_FORMAT FindBackBufferType(ID3D11Device *pDevice, int iBPP)
@@ -764,35 +746,99 @@ void RageDisplay_D3D11::SendCurrentMatrices()
 	}
 }
 
-class RageCompiledGeometrySWD3D : public RageCompiledGeometry
+class RageCompiledGeometryD3D11 : public RageCompiledGeometry
 {
 public:
+	RageCompiledGeometryD3D11(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext) :
+		m_pDevice(pDevice),
+		m_pDeviceContext(pDeviceContext)
+	{}
+
 	void Allocate( const std::vector<msMesh> &vMeshes )
 	{
-		m_vVertex.resize( std::max<unsigned int>(1u, GetTotalVertices()) );
-		m_vTriangles.resize( std::max<unsigned int>(1u, GetTotalTriangles()) );
+		D3D11_BUFFER_DESC bufferDesc;
+		// TODO do I need to make the size at least 1?
+		bufferDesc.ByteWidth = GetTotalVertices() * sizeof(float) * 8;
+		bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+		bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		bufferDesc.CPUAccessFlags = 0;
+		bufferDesc.MiscFlags = 0;
+		bufferDesc.StructureByteStride = 0;
+
+		HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, nullptr, &m_pVertexBuffer);
+		ASSERT(SUCCEEDED(hr));
+
+		if (m_bAnyNeedsTextureMatrixScale)
+		{
+			bufferDesc.ByteWidth = GetTotalVertices() * sizeof(float) * 2;
+			hr = m_pDevice->CreateBuffer(&bufferDesc, nullptr, &m_pVertexTextureScaleBuffer);
+			ASSERT(SUCCEEDED(hr));
+		}
+
+		bufferDesc.ByteWidth = GetTotalTriangles() * sizeof(msTriangle);
+		bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+		hr = m_pDevice->CreateBuffer(&bufferDesc, nullptr, &m_pIndexBuffer);
+		ASSERT(SUCCEEDED(hr));
 	}
+
 	void Change( const std::vector<msMesh> &vMeshes )
 	{
-		for( std::size_t i=0; i<vMeshes.size(); i++ )
+		std::vector<float> vVertexBuffer(GetTotalVertices() * 8), vVertexTextureScaleBuffer, vIndexBuffer(GetTotalTriangles() * 3);
+		if (m_bAnyNeedsTextureMatrixScale)
+			vVertexTextureScaleBuffer.resize(GetTotalVertices() * 2);
+
+		for (std::size_t i = 0; i < vMeshes.size(); i++)
 		{
 			const MeshInfo& meshInfo = m_vMeshInfo[i];
 			const msMesh& mesh = vMeshes[i];
-			const std::vector<RageModelVertex> &Vertices = mesh.Vertices;
-			const std::vector<msTriangle> &Triangles = mesh.Triangles;
 
-			for( std::size_t j=0; j<Vertices.size(); j++ )
-				m_vVertex[meshInfo.iVertexStart+j] = Vertices[j];
+			for (std::size_t j = 0; j < mesh.Vertices.size(); j++)
+			{
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8    ] = mesh.Vertices[j].p.x;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 1] = mesh.Vertices[j].p.y;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 2] = mesh.Vertices[j].p.z;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 3] = mesh.Vertices[j].n.x;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 4] = mesh.Vertices[j].n.y;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 5] = mesh.Vertices[j].n.z;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 6] = mesh.Vertices[j].t.x;
+				vVertexBuffer[(meshInfo.iVertexStart + j) * 8 + 7] = mesh.Vertices[j].t.y;
+			}
 
-			for( std::size_t j=0; j<Triangles.size(); j++ )
-				for( std::size_t k=0; k<3; k++ )
-					m_vTriangles[meshInfo.iTriangleStart+j].nVertexIndices[k] = (std::uint16_t) meshInfo.iVertexStart + Triangles[j].nVertexIndices[k];
+			if (m_bAnyNeedsTextureMatrixScale)
+			{
+				for (std::size_t j = 0; j < mesh.Vertices.size(); j++)
+				{
+					vVertexTextureScaleBuffer[(meshInfo.iVertexStart + j) * 2    ] = mesh.Vertices[j].TextureMatrixScale.x;
+					vVertexTextureScaleBuffer[(meshInfo.iVertexStart + j) * 2 + 1] = mesh.Vertices[j].TextureMatrixScale.y;
+				}
+			}
+
+			for (std::size_t j = 0; j < mesh.Triangles.size(); j++)
+				for (std::size_t k = 0; k < 3; k++)
+					vIndexBuffer[(meshInfo.iTriangleStart + j) * 3 + k] = static_cast<std::uint16_t>(meshInfo.iVertexStart) + mesh.Triangles[j].nVertexIndices[k];
 		}
+
+		//TODO UpdateSubresource1 with D3D11_COPY_DISCARD
+		m_pDeviceContext->UpdateSubresource(m_pVertexBuffer.Get(), 0, nullptr, vVertexBuffer.data(), 0, 0);
+		m_pDeviceContext->UpdateSubresource(m_pIndexBuffer.Get(), 0, nullptr, vIndexBuffer.data(), 0, 0);
+		if (m_bAnyNeedsTextureMatrixScale)
+			m_pDeviceContext->UpdateSubresource(m_pVertexTextureScaleBuffer.Get(), 0, nullptr, vVertexTextureScaleBuffer.data(), 0, 0);
 	}
+
 	void Draw( int iMeshIndex ) const
 	{
 		const MeshInfo& meshInfo = m_vMeshInfo[iMeshIndex];
 
+		m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+		m_pDeviceContext->IASetInputLayout(TODO);
+		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		ID3D11Buffer* vertexBuffers[2] = { m_pVertexBuffer.Get(), m_pVertexTextureScaleBuffer.Get() };
+		m_pDeviceContext->IASetVertexBuffers(0, 2, vertexBuffers, nullptr, nullptr);
+
+		//TODO rest of rendering state
+
+		// TODO handle the texture matrix scale somehow
 		if( meshInfo.m_bNeedsTextureMatrixScale )
 		{
 			// Kill the texture translation.
@@ -806,27 +852,20 @@ public:
 			g_pd3dDevice->SetTransform( D3DTS_TEXTURE0, (D3DMATRIX*)&m );
 		}
 
-		g_pd3dDevice->SetFVF( D3DFVF_RageModelVertex );
-		g_pd3dDevice->DrawIndexedPrimitiveUP(
-			D3DPT_TRIANGLELIST,			// PrimitiveType
-			meshInfo.iVertexStart,		// MinIndex
-			meshInfo.iVertexCount,		// NumVertices
-			meshInfo.iTriangleCount,	// PrimitiveCount,
-			&m_vTriangles[0]+meshInfo.iTriangleStart,// pIndexData,
-			D3DFMT_INDEX16,				// IndexDataFormat,
-			&m_vVertex[0],				// pVertexStreamZeroData,
-			sizeof(m_vVertex[0])		// VertexStreamZeroStride
-		);
+		m_pDeviceContext->DrawIndexed(meshInfo.iTriangleCount * 3, meshInfo.iTriangleStart * 3, 0);
 	}
 
 protected:
-	std::vector<RageModelVertex> m_vVertex;
-	std::vector<msTriangle>		m_vTriangles;
+	Microsoft::WRL::ComPtr<ID3D11Device> m_pDevice;
+	Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_pDeviceContext;
+	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pVertexBuffer;
+	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pVertexTextureScaleBuffer;
+	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pIndexBuffer;
 };
 
 RageCompiledGeometry* RageDisplay_D3D11::CreateCompiledGeometry()
 {
-	return new RageCompiledGeometrySWD3D;
+	return new RageCompiledGeometryD3D11(m_pDevice.Get(), m_pDeviceContext.Get());
 }
 
 void RageDisplay_D3D11::DeleteCompiledGeometry( RageCompiledGeometry* p )
@@ -834,154 +873,257 @@ void RageDisplay_D3D11::DeleteCompiledGeometry( RageCompiledGeometry* p )
 	delete p;
 }
 
+void RageDisplay_D3D11::PrepareVertexBuffers( const RageSpriteVertex v[], int iNumVerts )
+{
+	m_pDeviceContext->IASetInputLayout(TODO);
+
+	//TODO don't allocate a new buffer for each draw
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = iNumVerts * sizeof(RageSpriteVertex);
+	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
+	bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA subresourceData;
+	subresourceData.pSysMem = reinterpret_cast<const void*>(v);
+	subresourceData.SysMemPitch = 0;
+	subresourceData.SysMemSlicePitch = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempVertexBuffer;
+	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempVertexBuffer);
+	ASSERT(SUCCEEDED(hr));
+
+	m_pDeviceContext->IASetVertexBuffers(0, 1, pTempVertexBuffer.GetAddressOf(), nullptr, nullptr);
+}
+
 void RageDisplay_D3D11::DrawQuadsInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	// there isn't a quad primitive in D3D, so we have to fake it with indexed triangles
-	int iNumQuads = iNumVerts/4;
-	int iNumTriangles = iNumQuads*2;
-	int iNumIndices = iNumTriangles*3;
-
-	// make a temporary index buffer
-	static std::vector<std::uint16_t> vIndices;
-	std::size_t uOldSize = vIndices.size();
-	std::size_t uNewSize = std::max(uOldSize, static_cast<std::size_t>(iNumIndices));
-	vIndices.resize( uNewSize );
-	for( std::uint16_t i=(std::uint16_t)uOldSize/6; i<(std::uint16_t)iNumQuads; i++ )
+	// there isn't a quad primitive in D3D11, so we have to fake it with indexed triangles
+	int iNumQuads = iNumVerts / 4;
+	int iNumTriangles = iNumQuads * 2;
+	int iNumNewVerts = iNumTriangles * 3;
+	std::vector<std::uint16_t> vTempIndexBuffer(iNumNewVerts);
+	for (int i = 0; i < iNumQuads; ++i)
 	{
-		vIndices[i*6+0] = i*4+0;
-		vIndices[i*6+1] = i*4+1;
-		vIndices[i*6+2] = i*4+2;
-		vIndices[i*6+3] = i*4+2;
-		vIndices[i*6+4] = i*4+3;
-		vIndices[i*6+5] = i*4+0;
+		vTempIndexBuffer[i * 6    ] = i * 4;
+		vTempIndexBuffer[i * 6 + 1] = i * 4 + 1;
+		vTempIndexBuffer[i * 6 + 2] = i * 4 + 2;
+		vTempIndexBuffer[i * 6 + 3] = i * 4 + 2;
+		vTempIndexBuffer[i * 6 + 4] = i * 4 + 3;
+		vTempIndexBuffer[i * 6 + 5] = i * 4;
 	}
 
-	g_pd3dDevice->SetFVF( D3DFVF_RageSpriteVertex );
+	//TODO don't allocate a new buffer for each draw
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = iNumNewVerts * sizeof(std::uint16_t);
+	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
+	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA subresourceData;
+	subresourceData.pSysMem = reinterpret_cast<const void*>(vTempIndexBuffer.data());
+	subresourceData.SysMemPitch = 0;
+	subresourceData.SysMemSlicePitch = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempIndexBuffer;
+	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempIndexBuffer);
+	ASSERT(SUCCEEDED(hr));
+
+	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// TODO rest of rendering state
 	SendCurrentMatrices();
-	g_pd3dDevice->DrawIndexedPrimitiveUP(
-		D3DPT_TRIANGLELIST, // PrimitiveType
-		0, // MinIndex
-		iNumVerts, // NumVertices
-		iNumTriangles, // PrimitiveCount,
-		&vIndices[0], // pIndexData,
-		D3DFMT_INDEX16, // IndexDataFormat,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex) // VertexStreamZeroStride
-	);
+
+	m_pDeviceContext->Draw(iNumNewVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawQuadStripInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	// there isn't a quad strip primitive in D3D, so we have to fake it with indexed triangles
-	int iNumQuads = (iNumVerts-2)/2;
-	int iNumTriangles = iNumQuads*2;
-	int iNumIndices = iNumTriangles*3;
-
-	// make a temporary index buffer
-	static std::vector<std::uint16_t> vIndices;
-	std::size_t uOldSize = vIndices.size();
-	std::size_t uNewSize = std::max(uOldSize, static_cast<std::size_t>(iNumIndices));
-	vIndices.resize( uNewSize );
-	for( std::uint16_t i=(std::uint16_t)uOldSize/6; i<(std::uint16_t)iNumQuads; i++ )
+#if 0
+	// there isn't a quad strip primitive in D3D11, so we have to fake it with indexed triangles
+	int iNumQuads = (iNumVerts - 2) / 2;
+	int iNumTriangles = iNumQuads * 2;
+	int iNumNewVerts = iNumTriangles * 3;
+	std::vector<std::uint16_t> vTempIndexBuffer(iNumNewVerts);
+	for (int i = 0; i < iNumQuads; ++i)
 	{
-		vIndices[i*6+0] = i*2+0;
-		vIndices[i*6+1] = i*2+1;
-		vIndices[i*6+2] = i*2+2;
-		vIndices[i*6+3] = i*2+1;
-		vIndices[i*6+4] = i*2+2;
-		vIndices[i*6+5] = i*2+3;
+		vTempIndexBuffer[i * 6    ] = i;
+		vTempIndexBuffer[i * 6 + 1] = i + 1;
+		vTempIndexBuffer[i * 6 + 2] = i + 2;
+		vTempIndexBuffer[i * 6 + 3] = i + 1;
+		vTempIndexBuffer[i * 6 + 4] = i + 2;
+		vTempIndexBuffer[i * 6 + 5] = i + 3;
 	}
 
-	g_pd3dDevice->SetFVF( D3DFVF_RageSpriteVertex );
+	//TODO don't allocate a new buffer for each draw
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = iNumNewVerts * sizeof(std::uint16_t);
+	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
+	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA subresourceData;
+	subresourceData.pSysMem = reinterpret_cast<const void*>(vTempIndexBuffer.data());
+	subresourceData.SysMemPitch = 0;
+	subresourceData.SysMemSlicePitch = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempIndexBuffer;
+	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempIndexBuffer);
+	ASSERT(SUCCEEDED(hr));
+
+	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// TODO rest of rendering state
 	SendCurrentMatrices();
-	g_pd3dDevice->DrawIndexedPrimitiveUP(
-		D3DPT_TRIANGLELIST, // PrimitiveType
-		0, // MinIndex
-		iNumVerts, // NumVertices
-		iNumTriangles, // PrimitiveCount,
-		&vIndices[0], // pIndexData,
-		D3DFMT_INDEX16, // IndexDataFormat,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex) // VertexStreamZeroStride
-	);
+
+	m_pDeviceContext->Draw(iNumNewVerts, 0);
+#else
+	// there isn't a quad strip primitive in D3D11, so we have to fake it
+	// but it seems that quad strip is pretty much identical to triangle strip
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+	// TODO rest of rendering state
+	SendCurrentMatrices();
+
+	m_pDeviceContext->Draw(iNumVerts, 0);
+#endif
 }
 
 void RageDisplay_D3D11::DrawSymmetricQuadStripInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	int iNumPieces = (iNumVerts-3)/3;
-	int iNumTriangles = iNumPieces*4;
-	int iNumIndices = iNumTriangles*3;
-
-	// make a temporary index buffer
-	static std::vector<std::uint16_t> vIndices;
-	std::size_t uOldSize = vIndices.size();
-	std::size_t uNewSize = std::max(uOldSize, static_cast<std::size_t>(iNumIndices));
-	vIndices.resize( uNewSize );
-	for( std::uint16_t i=(std::uint16_t)uOldSize/12; i<(std::uint16_t)iNumPieces; i++ )
+	// there isn't a quad strip primitive in D3D11, so we have to fake it with indexed triangles
+	int iNumQuadsHalf = (iNumVerts - 3) / 3;
+	int iNumTriangles = iNumQuadsHalf * 4;
+	int iNumNewVerts = iNumTriangles * 3;
+	std::vector<std::uint16_t> vTempIndexBuffer(iNumNewVerts);
+	for (int i = 0; i < iNumQuadsHalf; ++i)
 	{
 		// { 1, 3, 0 } { 1, 4, 3 } { 1, 5, 4 } { 1, 2, 5 }
-		vIndices[i*12+0] = i*3+1;
-		vIndices[i*12+1] = i*3+3;
-		vIndices[i*12+2] = i*3+0;
-		vIndices[i*12+3] = i*3+1;
-		vIndices[i*12+4] = i*3+4;
-		vIndices[i*12+5] = i*3+3;
-		vIndices[i*12+6] = i*3+1;
-		vIndices[i*12+7] = i*3+5;
-		vIndices[i*12+8] = i*3+4;
-		vIndices[i*12+9] = i*3+1;
-		vIndices[i*12+10] = i*3+2;
-		vIndices[i*12+11] = i*3+5;
+		vTempIndexBuffer[i * 12     ] = i * 3 + 1;
+		vTempIndexBuffer[i * 12 +  1] = i * 3 + 3;
+		vTempIndexBuffer[i * 12 +  2] = i * 3 + 0;
+		vTempIndexBuffer[i * 12 +  3] = i * 3 + 1;
+		vTempIndexBuffer[i * 12 +  4] = i * 3 + 4;
+		vTempIndexBuffer[i * 12 +  5] = i * 3 + 3;
+		vTempIndexBuffer[i * 12 +  6] = i * 3 + 1;
+		vTempIndexBuffer[i * 12 +  7] = i * 3 + 5;
+		vTempIndexBuffer[i * 12 +  8] = i * 3 + 4;
+		vTempIndexBuffer[i * 12 +  9] = i * 3 + 1;
+		vTempIndexBuffer[i * 12 + 10] = i * 3 + 2;
+		vTempIndexBuffer[i * 12 + 11] = i * 3 + 5;
 	}
 
-	g_pd3dDevice->SetFVF( D3DFVF_RageSpriteVertex );
+	//TODO don't allocate a new buffer for each draw
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = iNumNewVerts * sizeof(std::uint16_t);
+	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
+	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA subresourceData;
+	subresourceData.pSysMem = reinterpret_cast<const void*>(vTempIndexBuffer.data());
+	subresourceData.SysMemPitch = 0;
+	subresourceData.SysMemSlicePitch = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempIndexBuffer;
+	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempIndexBuffer);
+	ASSERT(SUCCEEDED(hr));
+
+	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// TODO rest of rendering state
 	SendCurrentMatrices();
-	g_pd3dDevice->DrawIndexedPrimitiveUP(
-		D3DPT_TRIANGLELIST, // PrimitiveType
-		0, // MinIndex
-		iNumVerts, // NumVertices
-		iNumTriangles, // PrimitiveCount,
-		&vIndices[0], // pIndexData,
-		D3DFMT_INDEX16, // IndexDataFormat,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex) // VertexStreamZeroStride
-	);
+
+	m_pDeviceContext->Draw(iNumNewVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawFanInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	g_pd3dDevice->SetFVF( D3DFVF_RageSpriteVertex );
+	// there isn't a quad strip primitive in D3D11, so we have to fake it with indexed triangles
+	int iNumTriangles = iNumVerts - 2;
+	int iNumNewVerts = iNumTriangles * 3;
+	std::vector<std::uint16_t> vTempIndexBuffer(iNumNewVerts);
+	for (int i = 0; i < iNumTriangles; ++i)
+	{
+		vTempIndexBuffer[i * 3    ] = 0;
+		vTempIndexBuffer[i * 3 + 1] = i + 1;
+		vTempIndexBuffer[i * 3 + 2] = i + 2;
+	}
+
+	//TODO don't allocate a new buffer for each draw
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = iNumNewVerts * sizeof(std::uint16_t);
+	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
+	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA subresourceData;
+	subresourceData.pSysMem = reinterpret_cast<const void*>(vTempIndexBuffer.data());
+	subresourceData.SysMemPitch = 0;
+	subresourceData.SysMemSlicePitch = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempIndexBuffer;
+	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempIndexBuffer);
+	ASSERT(SUCCEEDED(hr));
+
+	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// TODO rest of rendering state
 	SendCurrentMatrices();
-	g_pd3dDevice->DrawPrimitiveUP(
-		D3DPT_TRIANGLEFAN, // PrimitiveType
-		iNumVerts-2, // PrimitiveCount,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex)
-	);
+
+	m_pDeviceContext->Draw(iNumNewVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawStripInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	g_pd3dDevice->SetFVF( D3DFVF_RageSpriteVertex );
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+	// TODO rest of rendering state
 	SendCurrentMatrices();
-	g_pd3dDevice->DrawPrimitiveUP(
-		D3DPT_TRIANGLESTRIP, // PrimitiveType
-		iNumVerts-2, // PrimitiveCount,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex)
-	);
+
+	m_pDeviceContext->Draw(iNumVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawTrianglesInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	g_pd3dDevice->SetFVF( D3DFVF_RageSpriteVertex );
+	PrepareVertexBuffers(v, iNumVerts);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// TODO rest of rendering state
 	SendCurrentMatrices();
-	g_pd3dDevice->DrawPrimitiveUP(
-		D3DPT_TRIANGLELIST, // PrimitiveType
-		iNumVerts/3, // PrimitiveCount,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex)
-	);
+
+	m_pDeviceContext->Draw(iNumVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex )
@@ -1118,75 +1260,101 @@ void RageDisplay_D3D11::SetTextureFiltering( TextureUnit tu, bool b )
 
 void RageDisplay_D3D11::SetBlendMode( BlendMode mode )
 {
-	g_pd3dDevice->SetRenderState( D3DRS_ALPHABLENDENABLE, TRUE );
+	if (mode == m_CurrentBlendMode)
+		return;
 
-	if( mode == BLEND_INVERT_DEST )
-		g_pd3dDevice->SetRenderState( D3DRS_BLENDOP, D3DBLENDOP_SUBTRACT );
-	else
-		g_pd3dDevice->SetRenderState( D3DRS_BLENDOP, D3DBLENDOP_ADD );
+	m_CurrentBlendMode = mode;
+	m_bBlendStateChanged = true;
 
-	switch( mode )
+	switch (mode)
 	{
 	case BLEND_NORMAL:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	case BLEND_ADD:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
-	// This is not the right way to do BLEND_SUBTRACT.  This code is only here
-	// to prevent crashing when someone tries to use it. -Kyz
 	case BLEND_SUBTRACT:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ZERO );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_REV_SUBTRACT;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_REV_SUBTRACT;
 		break;
 	case BLEND_MODULATE:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ZERO );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_SRC_COLOR;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	case BLEND_COPY_SRC:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ONE );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ZERO );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
-	/* Effects currently missing in D3D: BLEND_ALPHA_MASK, BLEND_ALPHA_KNOCK_OUT
-	 * These two may require DirectX9 since D3DRS_SRCALPHA and D3DRS_DESTALPHA
-	 * don't seem to exist in DX8. -aj */
 	case BLEND_ALPHA_MASK:
-		// RGB: iSourceRGB = GL_ZERO; iDestRGB = GL_ONE;
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ZERO );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
-		// Alpha: iSourceAlpha = GL_ZERO; iDestAlpha = GL_SRC_ALPHA;
-		/*
-		g_pd3dDevice->SetRenderState( D3DRS_SRCALPHA,  D3DBLEND_ZERO );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTALPHA, D3DBLEND_SRCALPHA );
-		*/
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	case BLEND_ALPHA_KNOCK_OUT:
-		// RGB: iSourceRGB = GL_ZERO; iDestRGB = GL_ONE;
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ZERO );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
-		// Alpha: iSourceAlpha = GL_ZERO; iDestAlpha = GL_ONE_MINUS_SRC_ALPHA;
-		/*
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLENDALPHA,  D3DBLEND_ZERO );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLENDALPHA, D3DBLEND_INVSRCALPHA );
-		*/
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	case BLEND_ALPHA_MULTIPLY:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ZERO );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	case BLEND_WEIGHTED_MULTIPLY:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_DESTCOLOR );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_SRCCOLOR );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	case BLEND_INVERT_DEST:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ONE );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_SUBTRACT;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_SUBTRACT;
 		break;
 	case BLEND_NO_EFFECT:
-		g_pd3dDevice->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ZERO );
-		g_pd3dDevice->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
+		m_BlendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+		m_BlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+		m_BlendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+		m_BlendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		break;
 	default:
 		FAIL_M(ssprintf("Invalid BlendMode: %i", mode));
@@ -1195,9 +1363,7 @@ void RageDisplay_D3D11::SetBlendMode( BlendMode mode )
 
 bool RageDisplay_D3D11::IsZWriteEnabled() const
 {
-	DWORD b;
-	g_pd3dDevice->GetRenderState( D3DRS_ZWRITEENABLE, &b );
-	return b!=0;
+	return m_DepthStencilDesc.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ALL;
 }
 
 void RageDisplay_D3D11::SetZBias( float f )
@@ -1209,38 +1375,55 @@ void RageDisplay_D3D11::SetZBias( float f )
 	g_pd3dDevice->SetViewport( &viewData );
 }
 
-
 bool RageDisplay_D3D11::IsZTestEnabled() const
 {
-	DWORD b;
-	g_pd3dDevice->GetRenderState( D3DRS_ZFUNC, &b );
-	return b!=D3DCMP_ALWAYS;
+	// TODO should probably be disabled by default
+	return m_DepthStencilDesc.DepthEnable == TRUE && m_DepthStencilDesc.DepthFunc != D3D11_COMPARISON_ALWAYS;
 }
 
 void RageDisplay_D3D11::SetZWrite( bool b )
 {
-	g_pd3dDevice->SetRenderState( D3DRS_ZWRITEENABLE, b );
+	if (b == IsZWriteEnabled())
+		return;
+
+	m_bDepthStateChanged = true;
+	m_DepthStencilDesc.DepthWriteMask = b ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
 }
 
 void RageDisplay_D3D11::SetZTestMode( ZTestMode mode )
 {
-	g_pd3dDevice->SetRenderState( D3DRS_ZENABLE, D3DZB_TRUE );
-	DWORD dw;
-	switch( mode )
+	if (m_DepthStencilDesc.DepthEnable != TRUE)
 	{
-	case ZTEST_OFF:			dw = D3DCMP_ALWAYS;		break;
-	case ZTEST_WRITE_ON_PASS:	dw = D3DCMP_LESSEQUAL;	break;
-	case ZTEST_WRITE_ON_FAIL:	dw = D3DCMP_GREATER;	break;
+		m_bDepthStateChanged = true;
+		m_DepthStencilDesc.DepthEnable = TRUE;
+	}
+
+	D3D11_COMPARISON_FUNC depthFunc;
+	switch (mode)
+	{
+	case ZTEST_OFF:
+		depthFunc = D3D11_COMPARISON_ALWAYS;
+		break;
+	case ZTEST_WRITE_ON_PASS:
+		depthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		break;
+	case ZTEST_WRITE_ON_FAIL:
+		depthFunc = D3D11_COMPARISON_GREATER;
+		break;
 	default:
-		dw = D3DCMP_NEVER;
 		FAIL_M(ssprintf("Invalid ZTestMode: %i", mode));
 	}
-	g_pd3dDevice->SetRenderState( D3DRS_ZFUNC, dw );
+
+	if (m_DepthStencilDesc.DepthFunc != depthFunc)
+	{
+		m_bDepthStateChanged = true;
+		m_DepthStencilDesc.DepthFunc = depthFunc;
+	}
 }
 
 void RageDisplay_D3D11::ClearZBuffer()
 {
-	g_pd3dDevice->Clear( 0, nullptr, D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(0,0,0), 1.0f, 0x00000000 );
+	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.f, 0);
 }
 
 void RageDisplay_D3D11::SetTextureWrapping( TextureUnit tu, bool b )
@@ -1299,6 +1482,7 @@ void RageDisplay_D3D11::SetLightOff( int index )
 {
 	g_pd3dDevice->LightEnable( index, false );
 }
+
 void RageDisplay_D3D11::SetLightDirectional(
 	int index,
 	const RageColor &ambient,
@@ -1332,74 +1516,79 @@ void RageDisplay_D3D11::SetLightDirectional(
 
 void RageDisplay_D3D11::SetCullMode( CullMode mode )
 {
+	D3D11_CULL_MODE cullMode;
 	switch( mode )
 	{
 	case CULL_BACK:
-		g_pd3dDevice->SetRenderState( D3DRS_CULLMODE, D3DCULL_CW );
+		cullMode = D3D11_CULL_BACK;
 		break;
 	case CULL_FRONT:
-		g_pd3dDevice->SetRenderState( D3DRS_CULLMODE, D3DCULL_CCW );
+		cullMode = D3D11_CULL_FRONT;
 		break;
 	case CULL_NONE:
-		g_pd3dDevice->SetRenderState( D3DRS_CULLMODE, D3DCULL_NONE );
+		cullMode = D3D11_CULL_NONE;
 		break;
 	default:
 		FAIL_M(ssprintf("Invalid CullMode: %i", mode));
 	}
+
+	if (m_RasterizerDesc.CullMode != cullMode)
+	{
+		m_bRasterizerStateChanged = true;
+		m_RasterizerDesc.CullMode = cullMode;
+	}
 }
 
-void RageDisplay_D3D11::DeleteTexture( std::uintptr_t iTexHandle )
+struct RageTexture_D3D11
 {
-	if( iTexHandle == 0 )
-		return;
-
-	IDirect3DTexture9* pTex = reinterpret_cast<IDirect3DTexture9*>(iTexHandle);
-	pTex->Release();
-
-	// Delete palette (if any)
-	if( g_TexResourceToPaletteIndex.find(iTexHandle) != g_TexResourceToPaletteIndex.end() )
-		g_TexResourceToPaletteIndex.erase( g_TexResourceToPaletteIndex.find(iTexHandle) );
-	if( g_TexResourceToTexturePalette.find(iTexHandle) != g_TexResourceToTexturePalette.end() )
-		g_TexResourceToTexturePalette.erase( g_TexResourceToTexturePalette.find(iTexHandle) );
-}
-
+	RagePixelFormat m_Pixfmt;
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pTexture;
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_pSRV;
+	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRTV;
+	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDSV; // If m_pTexture is a render target and a depth buffer was requested, this will be a DSV of the depth buffer (and not of m_pTexture)
+};
 
 std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* img,
 	bool bGenerateMipMaps )
 {
-	HRESULT hr;
-	IDirect3DTexture9* pTex;
-	hr = g_pd3dDevice->CreateTexture( power_of_two(img->w), power_of_two(img->h), 1, 0, D3DFORMATS[pixfmt], D3DPOOL_MANAGED, &pTex, nullptr );
+	D3D11_TEXTURE2D_DESC textureDesc;
+	textureDesc.Width = img->w;
+	textureDesc.Height = img->h;
+	textureDesc.MipLevels = bGenerateMipMaps ? 0 : 1;
+	textureDesc.ArraySize = 1;
+	textureDesc.Format = DXGI_FORMATS[pixfmt];
+	textureDesc.SampleDesc = { 1, 0 };
+	textureDesc.Usage = D3D11_USAGE_DYNAMIC;
+	textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (bGenerateMipMaps ? D3D11_BIND_RENDER_TARGET: 0);
+	textureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	textureDesc.MiscFlags = bGenerateMipMaps ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
 
-	if( FAILED(hr) )
-		RageException::Throw( "CreateTexture(%i,%i,%s) failed: %s",
-		img->w, img->h, RagePixelFormatToString(pixfmt).c_str(), GetErrorString(hr).c_str() );
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
+	HRESULT hr = m_pDevice->CreateTexture2D(&textureDesc, nullptr, &pTexture);
+	ASSERT(SUCCEEDED(hr));
 
-	std::uintptr_t uTexHandle = reinterpret_cast<std::uintptr_t>(pTex);
+	D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+	hr = m_pDeviceContext->Map(pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+	ASSERT(SUCCEEDED(hr));
 
-	if( pixfmt == RagePixelFormat_PAL )
-	{
-		// Save palette
-		TexturePalette pal;
-		memset( pal.p, 0, sizeof(pal.p) );
-		for( int i=0; i<img->format->palette->ncolors; i++ )
-		{
-			RageSurfaceColor &c = img->format->palette->colors[i];
-			pal.p[i].peRed = c.r;
-			pal.p[i].peGreen = c.g;
-			pal.p[i].peBlue = c.b;
-			pal.p[i].peFlags = c.a;
-		}
+	const RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pixfmt];
+	RageSurface* pSurface = CreateSurfaceFrom(textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData), mappedSubresource.RowPitch);
+	RageSurfaceUtils::Blit(img, pSurface);
+	delete pSurface;
 
-		ASSERT( g_TexResourceToTexturePalette.find(uTexHandle) == g_TexResourceToTexturePalette.end() );
-		g_TexResourceToTexturePalette[uTexHandle] = pal;
-	}
+	m_pDeviceContext->Unmap(pTexture.Get(), 0);
 
-	UpdateTexture( uTexHandle, img, 0, 0, img->w, img->h );
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> pSRV;
+	hr = m_pDevice->CreateShaderResourceView(pTexture.Get(), nullptr, &pSRV);
+	ASSERT(SUCCEEDED(hr));
 
-	return uTexHandle;
+	if (bGenerateMipMaps)
+		m_pDeviceContext->GenerateMips(pSRV.Get());
+
+	RageTexture_D3D11* pTex = new RageTexture_D3D11{pixfmt, std::move(pTexture), std::move(pSRV)};
+	return reinterpret_cast<std::uintptr_t>(pTex);
 }
 
 void RageDisplay_D3D11::UpdateTexture(
@@ -1407,36 +1596,141 @@ void RageDisplay_D3D11::UpdateTexture(
 	RageSurface* img,
 	int xoffset, int yoffset, int width, int height )
 {
-	IDirect3DTexture9* pTex = reinterpret_cast<IDirect3DTexture9*>(uTexHandle);
-	ASSERT( pTex != nullptr );
+	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(uTexHandle);
 
-	RECT rect;
-	rect.left = xoffset;
-	rect.top = yoffset;
-	rect.right = width - xoffset;
-	rect.bottom = height - yoffset;
+	D3D11_TEXTURE2D_DESC textureDesc;
+	pTex->m_pTexture->GetDesc(&textureDesc);
 
-	D3DLOCKED_RECT lr;
-	pTex->LockRect( 0, &lr, &rect, 0 );
+	ASSERT(xoffset + width <= textureDesc.Width);
+	ASSERT(yoffset + height <= textureDesc.Height);
 
-	D3DSURFACE_DESC desc;
-	pTex->GetLevelDesc(0, &desc);
-	ASSERT( xoffset+width <= int(desc.Width) );
-	ASSERT( yoffset+height <= int(desc.Height) );
+	D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+	HRESULT hr = m_pDeviceContext->Map(pTex->m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+	ASSERT(SUCCEEDED(hr));
 
-	// Copy bits
-	int texpixfmt;
-	for(texpixfmt = 0; texpixfmt < NUM_RagePixelFormat; ++texpixfmt)
-		if(D3DFORMATS[texpixfmt] == desc.Format) break;
-	ASSERT( texpixfmt != NUM_RagePixelFormat );
+	const RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pTex->m_Pixfmt];
+	RageSurface* pSurface = CreateSurfaceFrom(width, height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData) + xoffset * desc.bpp / 4 + yoffset * mappedSubresource.RowPitch, mappedSubresource.RowPitch);
+	RageSurfaceUtils::Blit(img, pSurface, width, height);
+	delete pSurface;
 
-	RageSurface *Texture = CreateSurfaceFromPixfmt(RagePixelFormat(texpixfmt), lr.pBits, width, height, lr.Pitch);
-	ASSERT( Texture != nullptr );
-	RageSurfaceUtils::Blit( img, Texture, width, height );
+	m_pDeviceContext->Unmap(pTex->m_pTexture.Get(), 0);
+}
 
-	delete Texture;
+void RageDisplay_D3D11::DeleteTexture(std::uintptr_t iTexHandle)
+{
+	if (iTexHandle == 0)
+		return;
 
-	pTex->UnlockRect( 0 );
+	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexHandle);
+	delete pTex;
+}
+
+std::uintptr_t RageDisplay_D3D11::CreateRenderTarget(const RenderTargetParam& param, int& iTextureWidthOut, int& iTextureHeightOut)
+{
+	iTextureWidthOut = param.iWidth;
+	iTextureHeightOut = param.iHeight;
+
+	D3D11_TEXTURE2D_DESC textureDesc;
+	textureDesc.Width = param.iWidth;
+	textureDesc.Height = param.iHeight;
+	textureDesc.MipLevels = 1;
+	textureDesc.ArraySize = 1;
+	textureDesc.Format = param.bFloat ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+	textureDesc.SampleDesc = { 1, 0 };
+	textureDesc.Usage = D3D11_USAGE_DEFAULT;
+	textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+	textureDesc.CPUAccessFlags = 0;
+	textureDesc.MiscFlags = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
+	HRESULT hr = m_pDevice->CreateTexture2D(&textureDesc, nullptr, &pTexture);
+	ASSERT(SUCCEEDED(hr));
+
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> pSRV;
+	hr = m_pDevice->CreateShaderResourceView(pTexture.Get(), nullptr, &pSRV);
+	ASSERT(SUCCEEDED(hr));
+
+	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> pRTV;
+	hr = m_pDevice->CreateRenderTargetView(pTexture.Get(), nullptr, &pRTV);
+	ASSERT(SUCCEEDED(hr));
+
+	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> pDSV;
+	if (param.bWithDepthBuffer)
+	{
+		textureDesc.Format = DXGI_FORMAT_D16_UNORM;
+		textureDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+
+		Microsoft::WRL::ComPtr<ID3D11Texture2D> pDepthTexture;
+		hr = m_pDevice->CreateTexture2D(&textureDesc, nullptr, &pTexture);
+		ASSERT(SUCCEEDED(hr));
+
+		hr = m_pDevice->CreateDepthStencilView(pDepthTexture.Get(), nullptr, &pDSV);
+		ASSERT(SUCCEEDED(hr));
+	}
+
+	// TODO probably doesn't matter that for the render targer we don't have a valid RagePixelFormat but please check
+	// Looks like the format is only used for UpdateTexture or RageTextureLock but both of those are not allowed for the render target
+	RageTexture_D3D11* pTex = new RageTexture_D3D11{RagePixelFormat_Invalid, std::move(pTexture), std::move(pSRV), std::move(pRTV), std::move(pDSV)};
+	return reinterpret_cast<std::uintptr_t>(pTex);
+}
+
+std::uintptr_t RageDisplay_D3D11::GetRenderTarget();
+void RageDisplay_D3D11::SetRenderTarget(std::uintptr_t iHandle, bool bPreserveTexture);
+
+struct RageTextureLock_D3D11 : public RageTextureLock
+{
+	RageTextureLock_D3D11(ID3D11DeviceContext* pDeviceContext)
+		: m_pDeviceContext(pDeviceContext)
+	{
+	}
+
+	// TODO For performance reasons, the format of RageSurface must match the format of the texture
+	// So it would probably be a good reason to not take RageSurface as argument but rather return a surface with appropriate format from here
+	// But the problem is that this class is only ever used by MovieTexture_Generic and it also needs a surface format compatible with the decoder, so as it is now we could run into a format mismatch
+	void Lock(std::uintptr_t iTexHandle, RageSurface* pSurface)
+	{
+		ASSERT(m_pTexture.Get() == nullptr);
+		ASSERT(pSurface->pixels == nullptr);
+
+		RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexHandle);
+
+		D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+		HRESULT hr = m_pDeviceContext->Map(m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+		ASSERT(SUCCEEDED(hr));
+
+		D3D11_TEXTURE2D_DESC textureDesc;
+		pTex->m_pTexture->GetDesc(&textureDesc);
+		ASSERT(pSurface->w == textureDesc.Width);
+		ASSERT(pSurface->h == textureDesc.Height);
+		ASSERT(pSurface->pitch == mappedSubresource.RowPitch);
+
+		const RageDisplay::RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pTex->m_Pixfmt];
+		ASSERT(desc.bpp == pSurface->fmt.BitsPerPixel);
+		ASSERT(desc.masks[0] == pSurface->fmt.Rmask);
+		ASSERT(desc.masks[1] == pSurface->fmt.Gmask);
+		ASSERT(desc.masks[2] == pSurface->fmt.Bmask);
+		ASSERT(desc.masks[3] == pSurface->fmt.Amask);
+
+		pSurface->pixels = reinterpret_cast<std::uint8_t*>(mappedSubresource.pData);
+		pSurface->pixels_owned = false;
+	}
+
+	void Unlock(RageSurface* pSurface, bool bChanged)
+	{
+		m_pDeviceContext->Unmap(m_pTexture.Get(), 0);
+
+		m_pTexture.Reset();
+		pSurface->pixels = nullptr;
+	}
+
+private:
+	Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_pDeviceContext;
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pTexture;
+};
+
+RageTextureLock* RageDisplay_D3D11::CreateTextureLock()
+{
+	return new RageTextureLock_D3D11(m_pDeviceContext.Get());
 }
 
 void RageDisplay_D3D11::SetAlphaTest( bool b )

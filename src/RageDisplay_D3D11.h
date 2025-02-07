@@ -39,6 +39,7 @@ public:
 		int xoffset, int yoffset, int width, int height
 		);
 	void DeleteTexture( std::uintptr_t iTexHandle );
+	RageTextureLock* CreateTextureLock();
 	void ClearAllTextures();
 	int GetNumTextureUnits();
 	void SetTexture( TextureUnit tu, std::uintptr_t iTexture );
@@ -46,6 +47,13 @@ public:
 	void SetTextureWrapping( TextureUnit tu, bool b );
 	int GetMaxTextureSize() const;
 	void SetTextureFiltering( TextureUnit tu, bool b );
+	void SetEffectMode( EffectMode effect );
+	bool IsEffectModeSupported( EffectMode effect );
+	bool SupportsRenderToTexture() const { return true; }
+	bool SupportsFullscreenBorderlessWindow() const { return true; }
+	std::uintptr_t CreateRenderTarget( const RenderTargetParam& param, int& iTextureWidthOut, int& iTextureHeightOut );
+	std::uintptr_t GetRenderTarget();
+	void SetRenderTarget( std::uintptr_t iHandle, bool bPreserveTexture );
 	bool IsZWriteEnabled() const;
 	bool IsZTestEnabled() const;
 	void SetZWrite( bool b );
@@ -103,6 +111,18 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pRenderTarget;
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;
+
+	// TODO suboptimal shit, proof of concept for now
+	// fixing requires pretty big refactor of how Actor::DrawPrimitives() work
+	BlendMode m_CurrentBlendMode = BLEND_COPY_SRC;
+	bool m_bBlendStateChanged = false;
+	D3D11_BLEND_DESC m_BlendDesc = CD3D11_BLEND_DESC(CD3D11_DEFAULT{});
+
+	bool m_bDepthStateChanged = false;
+	D3D11_DEPTH_STENCIL_DESC m_DepthStencilDesc = CD3D11_DEPTH_STENCIL_DESC(CD3D11_DEFAULT{});
+
+	bool m_bRasterizerStateChanged = false;
+	D3D11_RASTERIZER_DESC m_RasterizerDesc = CD3D11_RASTERIZER_DESC(CD3D11_DEFAULT{});
 };
 
 #endif
