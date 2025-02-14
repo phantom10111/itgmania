@@ -36,58 +36,6 @@
 // be fine for the uses of this application though.
 const DXGI_FORMAT g_DefaultAdapterFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-/* Direct3D doesn't associate a palette with textures. Instead, we load a
- * palette into a slot. We need to keep track of which texture's palette is
- * stored in what slot. */
-std::map<std::uintptr_t, std::size_t>		g_TexResourceToPaletteIndex;
-std::list<std::size_t>			g_PaletteIndex;
-struct TexturePalette { PALETTEENTRY p[256]; };
-std::map<std::uintptr_t, TexturePalette>	g_TexResourceToTexturePalette;
-
-// Load the palette, if any, for the given texture into a palette slot, and make it current.
-static void SetPalette( std::uintptr_t TexResource )
-{
-	// If the texture isn't paletted, we have nothing to do.
-	if( g_TexResourceToTexturePalette.find(TexResource) == g_TexResourceToTexturePalette.end() )
-		return;
-
-	// Is the palette already loaded?
-	if( g_TexResourceToPaletteIndex.find(TexResource) == g_TexResourceToPaletteIndex.end() )
-	{
-		// It's not. Grab the least recently used slot.
-		UINT iPalIndex = static_cast<UINT>(g_PaletteIndex.front());
-
-		// If any other texture is currently using this slot, mark that palette unloaded.
-		for( std::map<std::uintptr_t, std::size_t>::iterator i = g_TexResourceToPaletteIndex.begin(); i != g_TexResourceToPaletteIndex.end(); ++i )
-		{
-			if( i->second != iPalIndex )
-				continue;
-			g_TexResourceToPaletteIndex.erase(i);
-			break;
-		}
-
-		// Load it.
-		TexturePalette& pal = g_TexResourceToTexturePalette[TexResource];
-		g_pd3dDevice->SetPaletteEntries( iPalIndex, pal.p );
-
-		g_TexResourceToPaletteIndex[TexResource] = iPalIndex;
-	}
-
-	const int iPalIndex = g_TexResourceToPaletteIndex[TexResource];
-
-	// Find this palette index in the least-recently-used queue and move it to the end.
-	for(std::list<std::size_t>::iterator i = g_PaletteIndex.begin(); i != g_PaletteIndex.end(); ++i)
-	{
-		if( *i != iPalIndex )
-			continue;
-		g_PaletteIndex.erase(i);
-		g_PaletteIndex.push_back(iPalIndex);
-		break;
-	}
-
-	g_pd3dDevice->SetCurrentTexturePalette( iPalIndex );
-}
-
 static const RageDisplay::RagePixelFormatDesc PIXEL_FORMAT_DESC[NUM_RagePixelFormat] = {
 	{
 		/* R8G8B8A8 */
@@ -172,10 +120,40 @@ const RageDisplay::RagePixelFormatDesc *RageDisplay_D3D11::GetPixelFormatDesc(Ra
 
 RageDisplay_D3D11::RageDisplay_D3D11()
 {
+	m_Viewport.TopLeftX = 0;
+	m_Viewport.TopLeftY = 0;
+	m_Viewport.MinDepth = 0.05f;
+	m_Viewport.MaxDepth = 1.f;
+
 	SetBlendMode(BLEND_NORMAL);
 
 	m_bDepthStateChanged = true;
 	m_DepthStencilDesc.DepthEnable = FALSE;
+
+	for (int i = 0; i < MAX_TEXTURES; ++i)
+	{
+		m_bLightsChanged[i] = false;
+		m_bLightsEnabled[i] = false;
+		// TODO figure out how to initialize everything
+		m_bLights[i];
+
+		m_bSamplerStateChanged[i] = false;
+		m_SamplerStates[i] = CD3D11_SAMPLER_DESC(CD3D11_DEFAULT{});
+
+		m_bTexturesChanged[i] = false;
+		m_pTextures[i] = nullptr;
+
+		m_bTextureModesChanged[i] = false;
+		m_TextureModes[i] = TextureMode_Modulate;
+	}
+
+	// TODO initialize constant buffer VS to appropriate values
+	m_ConstantBufferVS.numLights = 0;
+
+	// TODO should we also initialize textureModes?
+	m_ConstantBufferPS.numTextures = 0;
+
+	//TODO I'm not actually sure what should the default state of everything be
 }
 
 RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnacceleratedRenderer */ )
@@ -557,6 +535,9 @@ void RageDisplay_D3D11::ResolutionChanged()
 	hr = m_pDevice->CreateDepthStencilView(pDepthStencil.Get(), nullptr, &m_pDepthStencilView);
 	ASSERT(SUCCEEDED(hr));
 
+	m_iRenderTargetWidth = swapchainDesc.BufferDesc.Width;
+	m_iRenderTargetHeight = swapchainDesc.BufferDesc.Height;
+
 	RageDisplay::ResolutionChanged();
 }
 
@@ -569,9 +550,15 @@ bool RageDisplay_D3D11::BeginFrame()
 {
 	GraphicsWindow::Update();
 
-	static constexpr float fClearColor[4] = { 0.f, 0.f, 0.f, 1.f };
+	SetZWrite(true);
+
+	static constexpr const float fClearColor[4] = { 0.f, 0.f, 0.f, 1.f };
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView.Get(), fClearColor);
 	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.f, 0);
+
+	m_Viewport.Width = m_iRenderTargetWidth;
+	m_Viewport.Height = m_iRenderTargetHeight;
+	m_pDeviceContext->RSSetViewports(1, &m_Viewport);
 
 	m_pDeviceContext->OMSetRenderTargets(1, m_pRenderTargetView.GetAddressOf(), m_pDepthStencilView.Get());
 
@@ -947,51 +934,6 @@ void RageDisplay_D3D11::DrawQuadsInternal( const RageSpriteVertex v[], int iNumV
 
 void RageDisplay_D3D11::DrawQuadStripInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-#if 0
-	// there isn't a quad strip primitive in D3D11, so we have to fake it with indexed triangles
-	int iNumQuads = (iNumVerts - 2) / 2;
-	int iNumTriangles = iNumQuads * 2;
-	int iNumNewVerts = iNumTriangles * 3;
-	std::vector<std::uint16_t> vTempIndexBuffer(iNumNewVerts);
-	for (int i = 0; i < iNumQuads; ++i)
-	{
-		vTempIndexBuffer[i * 6    ] = i;
-		vTempIndexBuffer[i * 6 + 1] = i + 1;
-		vTempIndexBuffer[i * 6 + 2] = i + 2;
-		vTempIndexBuffer[i * 6 + 3] = i + 1;
-		vTempIndexBuffer[i * 6 + 4] = i + 2;
-		vTempIndexBuffer[i * 6 + 5] = i + 3;
-	}
-
-	//TODO don't allocate a new buffer for each draw
-	D3D11_BUFFER_DESC bufferDesc;
-	bufferDesc.ByteWidth = iNumNewVerts * sizeof(std::uint16_t);
-	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
-	bufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-	bufferDesc.CPUAccessFlags = 0;
-	bufferDesc.MiscFlags = 0;
-	bufferDesc.StructureByteStride = 0;
-
-	D3D11_SUBRESOURCE_DATA subresourceData;
-	subresourceData.pSysMem = reinterpret_cast<const void*>(vTempIndexBuffer.data());
-	subresourceData.SysMemPitch = 0;
-	subresourceData.SysMemSlicePitch = 0;
-
-	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempIndexBuffer;
-	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempIndexBuffer);
-	ASSERT(SUCCEEDED(hr));
-
-	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-	PrepareVertexBuffers(v, iNumVerts);
-
-	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-	// TODO rest of rendering state
-	SendCurrentMatrices();
-
-	m_pDeviceContext->Draw(iNumNewVerts, 0);
-#else
 	// there isn't a quad strip primitive in D3D11, so we have to fake it
 	// but it seems that quad strip is pretty much identical to triangle strip
 	PrepareVertexBuffers(v, iNumVerts);
@@ -1002,7 +944,6 @@ void RageDisplay_D3D11::DrawQuadStripInternal( const RageSpriteVertex v[], int i
 	SendCurrentMatrices();
 
 	m_pDeviceContext->Draw(iNumVerts, 0);
-#endif
 }
 
 void RageDisplay_D3D11::DrawSymmetricQuadStripInternal( const RageSpriteVertex v[], int iNumVerts )
@@ -1179,83 +1120,52 @@ void RageDisplay_D3D11::ClearAllTextures()
 
 int RageDisplay_D3D11::GetNumTextureUnits()
 {
-	return g_DeviceCaps.MaxSimultaneousTextures;
+	return MAX_TEXTURES;
 }
 
 void RageDisplay_D3D11::SetTexture( TextureUnit tu, std::uintptr_t iTexture )
 {
-//	g_DeviceCaps.MaxSimultaneousTextures = 1;
-	if( tu >= (int) g_DeviceCaps.MaxSimultaneousTextures )	// not supported
+	unsigned int idx = static_cast<unsigned int>(tu);
+	if( idx >= MAX_TEXTURES )	// not supported
 		return;
 
-	if( iTexture == 0 )
+	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexture);
+
+	if( m_pTextures[idx] != pTex )
 	{
-		g_pd3dDevice->SetTexture( tu, nullptr );
-
-		/* Intentionally commented out. Don't mess with texture stage state
-		 * when just setting the texture. Model sets its texture modes before
-		 * setting the final texture. */
-		//g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLOROP, D3DTOP_DISABLE );
-	}
-	else
-	{
-		IDirect3DTexture9* pTex = reinterpret_cast<IDirect3DTexture9*>(iTexture);
-		g_pd3dDevice->SetTexture( tu, pTex );
-
-		/* Intentionally commented out. Don't mess with texture stage state
-		 * when just setting the texture. Model sets its texture modes before
-		 * setting the final texture. */
-		//g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLOROP, D3DTOP_MODULATE );
-
-		// Set palette (if any)
-		SetPalette( iTexture );
+		m_bTexturesChanged[idx] = true;
+		m_pTextures[idx] = pTex;
 	}
 }
 
 void RageDisplay_D3D11::SetTextureMode( TextureUnit tu, TextureMode tm )
 {
-	if( tu >= (int) g_DeviceCaps.MaxSimultaneousTextures )	// not supported
+	unsigned int idx = static_cast<unsigned int>(tu);
+	if( idx >= MAX_TEXTURES )	// not supported
 		return;
 
-	switch( tm )
-	{
-	case TextureMode_Modulate:
-		// Use D3DTA_CURRENT instead of diffuse so that multitexturing works
-		// properly.  For stage 0, D3DTA_CURRENT is the diffuse color.
+	ASSERT_M(tm < NUM_TextureMode, ssprintf("Invalid TextureMode: %i", tm));
 
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLORARG1, D3DTA_TEXTURE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLORARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLOROP,   D3DTOP_MODULATE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAARG1, D3DTA_TEXTURE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAOP,   D3DTOP_MODULATE );
-		break;
-	case TextureMode_Add:
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLORARG1, D3DTA_TEXTURE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLORARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLOROP,   D3DTOP_ADD );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAARG1, D3DTA_TEXTURE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAOP,   D3DTOP_MODULATE );
-		break;
-	case TextureMode_Glow:
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLORARG1, D3DTA_TEXTURE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLORARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_COLOROP,   D3DTOP_SELECTARG2 );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAARG1, D3DTA_TEXTURE );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_ALPHAOP,   D3DTOP_MODULATE );
-		break;
+	if( m_TextureModes[idx] != tm )
+	{
+		m_bTextureModesChanged[idx] = true;
+		m_TextureModes[idx] = tm;
 	}
 }
 
 void RageDisplay_D3D11::SetTextureFiltering( TextureUnit tu, bool b )
 {
-	if( tu >= (int) g_DeviceCaps.MaxSimultaneousTextures ) // not supported
+	unsigned int idx = static_cast<unsigned int>(tu);
+	if( idx >= MAX_TEXTURES )	// not supported
 		return;
 
-	g_pd3dDevice->SetSamplerState( tu, D3DSAMP_MINFILTER, b ? D3DTEXF_LINEAR : D3DTEXF_POINT );
-	g_pd3dDevice->SetSamplerState( tu, D3DSAMP_MAGFILTER, b ? D3DTEXF_LINEAR : D3DTEXF_POINT );
+	// TODO maybe should be D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT?
+	D3D11_FILTER filter = b ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_MIN_MAG_MIP_POINT;
+	if( m_SamplerStates[idx].Filter != filter )
+	{
+		m_bSamplerStateChanged[idx] = true;
+		m_SamplerStates[idx].Filter = filter;
+	}
 }
 
 void RageDisplay_D3D11::SetBlendMode( BlendMode mode )
@@ -1368,11 +1278,9 @@ bool RageDisplay_D3D11::IsZWriteEnabled() const
 
 void RageDisplay_D3D11::SetZBias( float f )
 {
-	D3DVIEWPORT9 viewData;
-	g_pd3dDevice->GetViewport( &viewData );
-	viewData.MinZ = SCALE( f, 0.0f, 1.0f, 0.05f, 0.0f );
-	viewData.MaxZ = SCALE( f, 0.0f, 1.0f, 1.0f, 0.95f );
-	g_pd3dDevice->SetViewport( &viewData );
+	m_Viewport.MinDepth = SCALE( f, 0.0f, 1.0f, 0.05f, 0.0f );
+	m_Viewport.MaxDepth = SCALE( f, 0.0f, 1.0f, 1.0f, 0.95f );
+	m_pDeviceContext->RSSetViewports(1, &m_Viewport);
 }
 
 bool RageDisplay_D3D11::IsZTestEnabled() const
@@ -1428,12 +1336,17 @@ void RageDisplay_D3D11::ClearZBuffer()
 
 void RageDisplay_D3D11::SetTextureWrapping( TextureUnit tu, bool b )
 {
-	if( tu >= (int) g_DeviceCaps.MaxSimultaneousTextures )	// not supported
+	unsigned int idx = static_cast<unsigned int>(tu);
+	if( idx >= MAX_TEXTURES )	// not supported
 		return;
 
-	int mode = b ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
-	g_pd3dDevice->SetSamplerState( tu, D3DSAMP_ADDRESSU, mode );
-	g_pd3dDevice->SetSamplerState( tu, D3DSAMP_ADDRESSV, mode );
+	D3D11_TEXTURE_ADDRESS_MODE mode = b ? D3D11_TEXTURE_ADDRESS_WRAP : D3D11_TEXTURE_ADDRESS_CLAMP;
+	if( m_SamplerStates[idx].AddressU != mode )
+	{
+		m_bSamplerStateChanged[idx] = true;
+		m_SamplerStates[idx].AddressU = mode;
+		m_SamplerStates[idx].AddressV = mode;
+	}
 }
 
 void RageDisplay_D3D11::SetMaterial(
@@ -1475,12 +1388,16 @@ void RageDisplay_D3D11::SetMaterial(
 
 void RageDisplay_D3D11::SetLighting( bool b )
 {
-	g_pd3dDevice->SetRenderState( D3DRS_LIGHTING, b );
+	m_bLightingEnabled = true;
 }
 
 void RageDisplay_D3D11::SetLightOff( int index )
 {
-	g_pd3dDevice->LightEnable( index, false );
+	if( m_bLightsEnabled[index] )
+	{
+		m_bLightsChanged[index] = true;
+		m_bLightsEnabled[index] = false;
+	}
 }
 
 void RageDisplay_D3D11::SetLightDirectional(
@@ -1490,28 +1407,21 @@ void RageDisplay_D3D11::SetLightDirectional(
 	const RageColor &specular,
 	const RageVector3 &dir )
 {
-	g_pd3dDevice->LightEnable( index, true );
+	m_bLightsChanged[index] = true;
+	m_bLightsEnabled[index] = true;
+	memcpy( &m_Lights[index].ambient, ambient, sizeof(ambient) );
+	memcpy( &m_Lights[index].diffuse, diffuse, sizeof(diffuse) );
+	memcpy( &m_Lights[index].specular, specular, sizeof(specular) );
+	memcpy( &m_Lights[index].direction, dir, sizeof(dir) );
 
-	D3DLIGHT9 light;
-	ZERO( light );
-	light.Type = D3DLIGHT_DIRECTIONAL;
-
+#if 0
+	// TODO Do I need to flip Z like in D3D9???
 	/* Z for lighting is flipped for D3D compared to OpenGL.
 	 * XXX: figure out exactly why this is needed. Our transforms are probably
 	 * goofed up, but the Z test is the same for both API's, so I'm not sure
 	 * why we don't see other weirdness. -Chris */
 	float position[] = { dir.x, dir.y, -dir.z };
-	memcpy( &light.Direction, position, sizeof(position) );
-	memcpy( &light.Diffuse, diffuse, sizeof(diffuse) );
-	memcpy( &light.Ambient, ambient, sizeof(ambient) );
-	memcpy( &light.Specular, specular, sizeof(specular) );
-
-	// Same as OpenGL defaults.  Not used in directional lights.
-//	light.Attenuation0 = 1;
-//	light.Attenuation1 = 0;
-//	light.Attenuation2 = 0;
-
-	g_pd3dDevice->SetLight( index, &light );
+#endif
 }
 
 void RageDisplay_D3D11::SetCullMode( CullMode mode )
@@ -1541,6 +1451,8 @@ void RageDisplay_D3D11::SetCullMode( CullMode mode )
 
 struct RageTexture_D3D11
 {
+	UINT m_iWidth;
+	UINT m_iHeight;
 	RagePixelFormat m_Pixfmt;
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pTexture;
 	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_pSRV;
@@ -1587,7 +1499,7 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	if (bGenerateMipMaps)
 		m_pDeviceContext->GenerateMips(pSRV.Get());
 
-	RageTexture_D3D11* pTex = new RageTexture_D3D11{pixfmt, std::move(pTexture), std::move(pSRV)};
+	RageTexture_D3D11* pTex = new RageTexture_D3D11{static_cast<UINT>(img->w), static_cast<UINT>(img->h), pixfmt, std::move(pTexture), std::move(pSRV)};
 	return reinterpret_cast<std::uintptr_t>(pTex);
 }
 
@@ -1618,10 +1530,11 @@ void RageDisplay_D3D11::UpdateTexture(
 
 void RageDisplay_D3D11::DeleteTexture(std::uintptr_t iTexHandle)
 {
-	if (iTexHandle == 0)
+	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexHandle);
+
+	if (pTex == nullptr)
 		return;
 
-	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexHandle);
 	delete pTex;
 }
 
@@ -1670,12 +1583,53 @@ std::uintptr_t RageDisplay_D3D11::CreateRenderTarget(const RenderTargetParam& pa
 
 	// TODO probably doesn't matter that for the render targer we don't have a valid RagePixelFormat but please check
 	// Looks like the format is only used for UpdateTexture or RageTextureLock but both of those are not allowed for the render target
-	RageTexture_D3D11* pTex = new RageTexture_D3D11{RagePixelFormat_Invalid, std::move(pTexture), std::move(pSRV), std::move(pRTV), std::move(pDSV)};
+	RageTexture_D3D11* pTex = new RageTexture_D3D11{static_cast<UINT>(param.iWidth), static_cast<UINT>(param.iHeight), RagePixelFormat_Invalid, std::move(pTexture), std::move(pSRV), std::move(pRTV), std::move(pDSV)};
 	return reinterpret_cast<std::uintptr_t>(pTex);
 }
 
-std::uintptr_t RageDisplay_D3D11::GetRenderTarget();
-void RageDisplay_D3D11::SetRenderTarget(std::uintptr_t iHandle, bool bPreserveTexture);
+std::uintptr_t RageDisplay_D3D11::GetRenderTarget()
+{
+	reinterpret_cast<std::uintptr_t>(m_pCurrentRenderTarget);
+}
+
+void RageDisplay_D3D11::SetRenderTarget(std::uintptr_t iHandle, bool bPreserveTexture)
+{
+	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iHandle);
+
+	if (pTex == nullptr)
+	{
+		/* Pop matrixes affected by SetDefaultRenderStates, undoing the push below. */
+		/* XXX: This will break if for example we call SetRenderTarget(0, ...) twice in a row, but that's how it's alwayhs been, even in the OpenGL renderer */
+		DISPLAY->CameraPopMatrix();
+
+		m_Viewport.Width = m_iRenderTargetWidth;
+		m_Viewport.Height = m_iRenderTargetHeight;
+		m_pDeviceContext->RSSetViewports(1, &m_Viewport);
+
+		m_pDeviceContext->OMSetRenderTargets(1, m_pRenderTargetView.GetAddressOf(), m_pDepthStencilView.Get());
+	}
+	else
+	{
+		/* For compatibility with OpenGL renderer, set appropriate rendering state here. Push matrixes affected by SetDefaultRenderStates. */
+		DISPLAY->CameraPushMatrix();
+		SetDefaultRenderStates();
+		SetZWrite(true);
+
+		if (!bPreserveTexture)
+		{
+			static constexpr const float fClearColor[4] = { 0.f, 0.f, 0.f, 1.f };
+			m_pDeviceContext->ClearRenderTargetView(pTex->m_pRTV.Get(), fClearColor);
+			if (pTex->m_pDSV)
+				m_pDeviceContext->ClearDepthStencilView(pTex->m_pDSV.Get(), D3D11_CLEAR_DEPTH, 1.f, 0);
+		}
+
+		m_Viewport.Width = pTex->m_iWidth;
+		m_Viewport.Height = pTex->m_iHeight;
+		m_pDeviceContext->RSSetViewports(1, &m_Viewport);
+
+		m_pDeviceContext->OMSetRenderTargets(1, pTex->m_pRTV.GetAddressOf(), pTex->m_pDSV ? pTex->m_pDSV.Get() : m_pDepthStencilView.Get());
+	}
+}
 
 struct RageTextureLock_D3D11 : public RageTextureLock
 {
@@ -1735,9 +1689,11 @@ RageTextureLock* RageDisplay_D3D11::CreateTextureLock()
 
 void RageDisplay_D3D11::SetAlphaTest( bool b )
 {
-	g_pd3dDevice->SetRenderState( D3DRS_ALPHATESTENABLE, b );
-	g_pd3dDevice->SetRenderState( D3DRS_ALPHAREF, 0 );
-	g_pd3dDevice->SetRenderState( D3DRS_ALPHAFUNC, D3DCMP_GREATER );
+	if( m_ConstantBufferPS.bAlphaTestEnabled != b )
+	{
+		m_bConstantBufferPSChanged = true;
+		m_ConstantBufferPS.bAlphaTestEnabled = b;
+	}
 }
 
 RageMatrix RageDisplay_D3D11::GetOrthoMatrix( float l, float r, float b, float t, float zn, float zf )

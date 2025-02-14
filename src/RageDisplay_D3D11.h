@@ -7,6 +7,7 @@
 
 #include <wrl/client.h>
 #include <d3d11_1.h>
+#include <DirectXMath.h>
 
 #include <cstdint>
 
@@ -112,6 +113,12 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;
 
+	UINT m_iRenderTargetHeight;
+	UINT m_iRenderTargetWidth;
+
+	struct RageTexture_D3D11* m_pCurrentRenderTarget = nullptr;
+	D3D11_VIEWPORT m_Viewport;
+
 	// TODO suboptimal shit, proof of concept for now
 	// fixing requires pretty big refactor of how Actor::DrawPrimitives() work
 	BlendMode m_CurrentBlendMode = BLEND_COPY_SRC;
@@ -123,6 +130,52 @@ protected:
 
 	bool m_bRasterizerStateChanged = false;
 	D3D11_RASTERIZER_DESC m_RasterizerDesc = CD3D11_RASTERIZER_DESC(CD3D11_DEFAULT{});
+
+	struct LightData
+	{
+		DirectX::XMFLOAT4A ambient;
+		DirectX::XMFLOAT4A diffuse;
+		DirectX::XMFLOAT4A specular;
+		DirectX::XMFLOAT3A direction;
+	};
+
+	bool m_bLightingEnabled = false;
+	bool m_bLightsChanged[MAX_LIGHTS];
+	bool m_bLightsEnabled[MAX_LIGHTS];
+	LightData m_Lights[MAX_LIGHTS];
+
+	bool m_bConstantBufferVSChanged = true; // Changed because no buffer is bound by default
+	struct ConstantsVS
+	{
+		DirectX::XMFLOAT4X4A vertexTransform;
+		// 4th column of normalTransform is not used but it's here to get correct alignment
+		DirectX::XMFLOAT3X4A normalTransform;
+		std::uint32_t numLights;
+		float materialShininess;
+		DirectX::XMFLOAT4A noLightingMaterialColor;
+		DirectX::XMFLOAT4A materialAmbient;
+		DirectX::XMFLOAT4A materialDiffuse;
+		DirectX::XMFLOAT4A materialSpecular;
+		DirectX::XMFLOAT4A materialEmission;
+		LightData lights[MAX_LIGHTS];
+	} m_ConstantBufferVS;
+
+	bool m_bSamplerStateChanged[MAX_TEXTURES];
+	D3D11_SAMPLER_DESC m_SamplerStates[MAX_TEXTURES];
+
+	bool m_bTexturesChanged[MAX_TEXTURES];
+	struct RageTexture_D3D11* m_pTextures[MAX_TEXTURES];
+
+	bool m_bTextureModesChanged[MAX_TEXTURES];
+	TextureMode m_TextureModes[MAX_TEXTURES];
+
+	bool m_bConstantBufferPSChanged = true; // Changed because no buffer is bound by default
+	struct ConstantsPS
+	{
+		std::uint32_t numTextures;
+		std::uint32_t textureModes;
+		bool bAlphaTestEnabled;
+	} m_ConstantBufferPS;
 };
 
 #endif
