@@ -24,6 +24,7 @@
 #include <dxgidebug.h>
 #include <dxgi1_6.h>
 #include <d3d11sdklayers.h>
+#include <d3dcompiler.h>
 
 #include <cmath>
 #include <cstddef>
@@ -125,35 +126,28 @@ RageDisplay_D3D11::RageDisplay_D3D11()
 	m_Viewport.MinDepth = 0.05f;
 	m_Viewport.MaxDepth = 1.f;
 
-	SetBlendMode(BLEND_NORMAL);
-
-	m_bDepthStateChanged = true;
-	m_DepthStencilDesc.DepthEnable = FALSE;
-
-	for (int i = 0; i < MAX_TEXTURES; ++i)
-	{
-		m_bLightsChanged[i] = false;
+	for (int i = 0; i < D3D11_MAX_LIGHTS; ++i)
 		m_bLightsEnabled[i] = false;
-		// TODO figure out how to initialize everything
-		m_bLights[i];
 
+	for (int i = 0; i < D3D11_MAX_TEXTURES; ++i)
+	{
 		m_bSamplerStateChanged[i] = false;
 		m_SamplerStates[i] = CD3D11_SAMPLER_DESC(CD3D11_DEFAULT{});
 
-		m_bTexturesChanged[i] = false;
-		m_pTextures[i] = nullptr;
-
-		m_bTextureModesChanged[i] = false;
+		m_iTextures[i] = 0;
 		m_TextureModes[i] = TextureMode_Modulate;
 	}
 
-	// TODO initialize constant buffer VS to appropriate values
 	m_ConstantBufferVS.numLights = 0;
+	m_ConstantBufferVS.materialShininess = 0.f;
+	m_ConstantBufferVS.noLightingMaterialColor = DirectX::XMFLOAT4A{1.f, 1.f, 1.f, 1.f};
+	m_ConstantBufferVS.materialAmbient = DirectX::XMFLOAT4A{0.f, 0.f, 0.f, 1.f};
+	m_ConstantBufferVS.materialDiffuse = DirectX::XMFLOAT4A{1.f, 1.f, 1.f, 1.f};
+	m_ConstantBufferVS.materialSpecular = DirectX::XMFLOAT4A{0.f, 0.f, 0.f, 1.f};
+	m_ConstantBufferVS.materialEmission = DirectX::XMFLOAT4A{0.f, 0.f, 0.f, 1.f};
 
-	// TODO should we also initialize textureModes?
 	m_ConstantBufferPS.numTextures = 0;
-
-	//TODO I'm not actually sure what should the default state of everything be
+	m_ConstantBufferPS.bAlphaTestEnabled = true;
 }
 
 RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnacceleratedRenderer */ )
@@ -333,6 +327,85 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	}
 #endif
 
+#ifdef DEBUG
+	static constexpr const bool bDebugShaders = true;
+#else
+	const bool bDebugShaders = PREFSMAN->m_bDebugShaders;
+#endif
+
+#define QUOTE(x) QUOTE2(x)
+#define QUOTE2(x) #x
+	D3D_SHADER_MACRO shaderDefinitions[] = { {"MAX_LIGHTS", QUOTE(D3D11_MAX_LIGHTS)}, {"MAX_TEXTURES", QUOTE(D3D11_MAX_TEXTURES)}, {"VERTEX_HAS_COLOR", "0"}, {nullptr, nullptr} };
+#undef QUOTE
+#undef QUOTE2
+
+	Microsoft::WRL::ComPtr<ID3DBlob> pErrorMsgs;
+	Microsoft::WRL::ComPtr<ID3DBlob> pModelVSBytecode;
+
+	const UINT shaderCompileFlags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS | (bDebugShaders ? (D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION) : D3DCOMPILE_OPTIMIZATION_LEVEL3);
+	hr = D3DCompile(TODO, TODO, "builtin model shader vs", shaderDefinitions, nullptr, "VSMain", "vs_5_0", shaderCompileFlags, 0, &pModelVSBytecode, &pErrorMsgs);
+	if (!SUCCEEDED(hr))
+	{
+		char buffer[1024];
+		ASSERT(FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, nullptr, hr, MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), buffer, sizeof(buffer), nullptr));
+		return ssprintf("Compiling shader \"%s\":D3DCompile failed %ul(%s): %s", shaderName, hr, buffer, pErrorMsgs->GetBufferPointer());
+	}
+
+	shaderDefinitions[2].Definition = "1"; // #define VERTEX_HAS_COLOR 1
+	Microsoft::WRL::ComPtr<ID3DBlob> pSpriteVSBytecode;
+	hr = D3DCompile(TODO, TODO, "builtin sprite shader vs", shaderDefinitions, nullptr, "VSMain", "vs_5_0", shaderCompileFlags, 0, &pSpriteVSBytecode, &pErrorMsgs);
+	if (!SUCCEEDED(hr))
+	{
+		TODO;
+	}
+
+	Microsoft::WRL::ComPtr<ID3DBlob> pBuiltinPSBytecode;
+	hr = D3DCompile(TODO, TODO, "builtin shader ps", shaderDefinitions, nullptr, "PSMain", "ps_5_0", shaderCompileFlags, 0, &pBuiltinPSBytecode, &pErrorMsgs);
+	if (!SUCCEEDED(hr))
+	{
+		TODO;
+	}
+
+	hr = m_pDevice->CreateVertexShader(pModelVSBytecode->GetBufferPointer(), pModelVSBytecode->GetBufferSize(), nullptr, &m_pModelVertexShader);
+	ASSERT(SUCCEEDED(hr));
+
+	hr = m_pDevice->CreateVertexShader(pSpriteVSBytecode->GetBufferPointer(), pSpriteVSBytecode->GetBufferSize(), nullptr, &m_pSpriteVertexShader);
+	ASSERT(SUCCEEDED(hr));
+
+	hr = m_pDevice->CreatePixelShader(pBuiltinPSBytecode->GetBufferPointer(), pBuiltinPSBytecode->GetBufferSize(), nullptr, &m_pBuiltinPixelShader);
+	ASSERT(SUCCEEDED(hr));
+
+	D3D11_INPUT_ELEMENT_DESC inputElementDescs[4] = {
+		{"SV_Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageModelVertex, p), D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageModelVertex, n), D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(RageModelVertex, t), D3D11_INPUT_PER_VERTEX_DATA, 0}
+	};
+
+	// TODO is it ok not to pass a shader here? Do I need to pass it? Should I pass it?
+	hr = m_pDevice->CreateInputLayout(inputElementDescs, 3, nullptr, 0, &m_pModelInputLayout);
+	ASSERT(SUCCEEDED(hr));
+
+	inputElementDescs[2] = {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageSpriteVertex, c), D3D11_INPUT_PER_VERTEX_DATA, 0};
+	inputElementDescs[3] = {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(RageSpriteVertex, t), D3D11_INPUT_PER_VERTEX_DATA, 0};
+
+	hr = m_pDevice->CreateInputLayout(inputElementDescs, 4, nullptr, 0, &m_pSpriteInputLayout);
+	ASSERT(SUCCEEDED(hr));
+
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = sizeof(m_ConstantBufferVS);
+	bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+	bufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	hr = m_pDevice->CreateBuffer(&bufferDesc, nullptr, &m_pConstantBufferVS);
+	ASSERT(SUCCEEDED(hr));
+
+	bufferDesc.ByteWidth = sizeof(m_ConstantBufferPS);
+	hr = m_pDevice->CreateBuffer(&bufferDesc, nullptr, &m_pConstantBufferPS);
+	ASSERT(SUCCEEDED(hr));
+
 	//TODO fix comment
 	/* Up until now, all we've done is set up g_pd3d and do some queries. Now,
 	 * actually initialize the window. Do this after as many error conditions as
@@ -431,7 +504,7 @@ DXGI_FORMAT FindBackBufferType(ID3D11Device *pDevice, int iBPP)
 		hr = pDevice->CheckFormatSupport(vBackBufferFormats[i], &formatSupport);
 		ASSERT(SUCCEEDED(hr));
 
-		const UINT requiredFlags = D3D11_FORMAT_SUPPORT_RENDER_TARGET | D3D11_FORMAT_SUPPORT_DISPLAY;
+		static constexpr const UINT requiredFlags = D3D11_FORMAT_SUPPORT_RENDER_TARGET | D3D11_FORMAT_SUPPORT_DISPLAY;
 		if( (formatSupport & requiredFlags) != requiredFlags )
 			continue; // skip
 
@@ -549,8 +622,6 @@ int RageDisplay_D3D11::GetMaxTextureSize() const
 bool RageDisplay_D3D11::BeginFrame()
 {
 	GraphicsWindow::Update();
-
-	SetZWrite(true);
 
 	static constexpr const float fClearColor[4] = { 0.f, 0.f, 0.f, 1.f };
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView.Get(), fClearColor);
@@ -733,6 +804,150 @@ void RageDisplay_D3D11::SendCurrentMatrices()
 	}
 }
 
+void RageDisplay_D3D11::BindRenderingState()
+{
+	if (m_bRasterizerStateChanged)
+	{
+		m_bRasterizerStateChanged = false;
+
+		Microsoft::WRL::ComPtr<ID3D11RasterizerState> pRasterizerState;
+		HRESULT hr = m_pDevice->CreateRasterizerState(&m_RasterizerDesc, &pRasterizerState);
+		ASSERT(SUCCEEDED(hr));
+
+		m_pDeviceContext->RSSetState(pRasterizerState.Get());
+	}
+
+	if (m_bBlendStateChanged)
+	{
+		m_bBlendStateChanged = false;
+
+		Microsoft::WRL::ComPtr<ID3D11BlendState> pBlendState;
+		HRESULT hr = m_pDevice->CreateBlendState(&m_BlendDesc, &pBlendState);
+		ASSERT(SUCCEEDED(hr));
+
+		m_pDeviceContext->OMSetBlendState(pBlendState.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
+	}
+
+	if (m_bDepthStateChanged)
+	{
+		m_bDepthStateChanged = false;
+
+		Microsoft::WRL::ComPtr<ID3D11DepthStencilState> pDepthStencilState;
+		HRESULT hr = m_pDevice->CreateDepthStencilState(&m_DepthStencilDesc, &pDepthStencilState);
+		ASSERT(SUCCEEDED(hr));
+
+		m_pDeviceContext->OMSetDepthStencilState(pDepthStencilState.Get(), D3D11_DEFAULT_STENCIL_REFERENCE);
+	}
+
+	if (m_bLightsChanged)
+	{
+		m_bLightsChanged = false;
+		m_bConstantBufferVSChanged = true;
+
+		if (m_bLightingEnabled)
+		{
+			std::uint32_t numLights = 0;
+
+			for (unsigned i = 0; i < D3D11_MAX_LIGHTS; ++i)
+			{
+				if (m_bLightsEnabled[i])
+					m_ConstantBufferVS.lights[numLights++] = m_Lights[i];
+			}
+
+			m_ConstantBufferVS.numLights = numLights + 1;
+		}
+		else
+		{
+			m_ConstantBufferVS.numLights = 0;
+		}
+	}
+
+	if (m_bConstantBufferVSChanged)
+	{
+		m_bConstantBufferVSChanged = false;
+
+		D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+		HRESULT hr = m_pDeviceContext->Map(m_pConstantBufferVS.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+		ASSERT(SUCCEEDED(hr));
+
+		std::memcpy(mappedSubresource.pData, &m_ConstantBufferVS, sizeof(m_ConstantBufferVS));
+		m_pDeviceContext->Unmap(m_pConstantBufferVS.Get(), 0);
+		m_pDeviceContext->VSSetConstantBuffers(0, 1, m_pConstantBufferVS.GetAddressOf());
+	}
+
+	if (m_bTexturesChanged)
+	{
+		m_bTexturesChanged = false;
+		m_bConstantBufferPSChanged = true;
+
+		m_ConstantBufferPS.numTextures = 0;
+		m_ConstantBufferPS.textureModes = 0;
+
+		ID3D11SamplerState* pSamplerStates[D3D11_MAX_TEXTURES];
+		ID3D11ShaderResourceView* pSRVs[D3D11_MAX_TEXTURES];
+
+		for (unsigned i = 0; i < D3D11_MAX_TEXTURES; ++i)
+		{
+			if (m_iTextures[i] != 0)
+			{
+				if (m_bSamplerStateChanged[i])
+				{
+					m_bSamplerStateChanged[i] = false;
+					HRESULT hr = m_pDevice->CreateSamplerState(&m_SamplerStates[i], &m_pSamplerStates[i]);
+					ASSERT(SUCCEEDED(hr));
+				}
+
+				m_ConstantBufferPS.textureModes |= m_TextureModes[i] << (m_ConstantBufferPS.numTextures * 2);
+				pSamplerStates[m_ConstantBufferPS.numTextures] = m_pSamplerStates[i].Get();
+
+				RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(m_iTextures[i]);
+				pSRVs[m_ConstantBufferPS.numTextures++] = pTex->m_pSRV.Get();
+			}
+		}
+
+		m_pDeviceContext->PSSetSamplers(0, m_ConstantBufferPS.numTextures, pSamplerStates);
+		m_pDeviceContext->PSSetShaderResources(0, m_ConstantBufferPS.numTextures, pSRVs);
+	}
+
+	if (m_bConstantBufferPSChanged)
+	{
+		m_bConstantBufferPSChanged = false;
+
+		D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+		HRESULT hr = m_pDeviceContext->Map(m_pConstantBufferPS.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+		ASSERT(SUCCEEDED(hr));
+
+		std::memcpy(mappedSubresource.pData, &m_ConstantBufferPS, sizeof(m_ConstantBufferPS));
+		m_pDeviceContext->Unmap(m_pConstantBufferPS.Get(), 0);
+		m_pDeviceContext->PSSetConstantBuffers(0, 1, m_pConstantBufferPS.GetAddressOf());
+	}
+}
+
+void RageDisplay_D3D11::BindVertexBuffers( const RageSpriteVertex v[], int iNumVerts )
+{
+	m_pDeviceContext->IASetInputLayout(m_pSpriteInputLayout.Get());
+
+	//TODO don't allocate a new buffer for each draw
+	D3D11_BUFFER_DESC bufferDesc;
+	bufferDesc.ByteWidth = iNumVerts * sizeof(RageSpriteVertex);
+	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
+	bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	bufferDesc.CPUAccessFlags = 0;
+	bufferDesc.MiscFlags = 0;
+	bufferDesc.StructureByteStride = 0;
+
+	D3D11_SUBRESOURCE_DATA subresourceData;
+	subresourceData.pSysMem = reinterpret_cast<const void*>(v);
+	subresourceData.SysMemPitch = 0;
+	subresourceData.SysMemSlicePitch = 0;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempVertexBuffer;
+	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempVertexBuffer);
+	ASSERT(SUCCEEDED(hr));
+
+	m_pDeviceContext->IASetVertexBuffers(0, 1, pTempVertexBuffer.GetAddressOf(), nullptr, nullptr);
+}
+
 class RageCompiledGeometryD3D11 : public RageCompiledGeometry
 {
 public:
@@ -817,13 +1032,10 @@ public:
 		const MeshInfo& meshInfo = m_vMeshInfo[iMeshIndex];
 
 		m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-		m_pDeviceContext->IASetInputLayout(TODO);
 		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		ID3D11Buffer* vertexBuffers[2] = { m_pVertexBuffer.Get(), m_pVertexTextureScaleBuffer.Get() };
 		m_pDeviceContext->IASetVertexBuffers(0, 2, vertexBuffers, nullptr, nullptr);
-
-		//TODO rest of rendering state
 
 		// TODO handle the texture matrix scale somehow
 		if( meshInfo.m_bNeedsTextureMatrixScale )
@@ -858,31 +1070,6 @@ RageCompiledGeometry* RageDisplay_D3D11::CreateCompiledGeometry()
 void RageDisplay_D3D11::DeleteCompiledGeometry( RageCompiledGeometry* p )
 {
 	delete p;
-}
-
-void RageDisplay_D3D11::PrepareVertexBuffers( const RageSpriteVertex v[], int iNumVerts )
-{
-	m_pDeviceContext->IASetInputLayout(TODO);
-
-	//TODO don't allocate a new buffer for each draw
-	D3D11_BUFFER_DESC bufferDesc;
-	bufferDesc.ByteWidth = iNumVerts * sizeof(RageSpriteVertex);
-	bufferDesc.Usage = D3D11_USAGE_IMMUTABLE;
-	bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	bufferDesc.CPUAccessFlags = 0;
-	bufferDesc.MiscFlags = 0;
-	bufferDesc.StructureByteStride = 0;
-
-	D3D11_SUBRESOURCE_DATA subresourceData;
-	subresourceData.pSysMem = reinterpret_cast<const void*>(v);
-	subresourceData.SysMemPitch = 0;
-	subresourceData.SysMemSlicePitch = 0;
-
-	Microsoft::WRL::ComPtr<ID3D11Buffer> pTempVertexBuffer;
-	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempVertexBuffer);
-	ASSERT(SUCCEEDED(hr));
-
-	m_pDeviceContext->IASetVertexBuffers(0, 1, pTempVertexBuffer.GetAddressOf(), nullptr, nullptr);
 }
 
 void RageDisplay_D3D11::DrawQuadsInternal( const RageSpriteVertex v[], int iNumVerts )
@@ -921,27 +1108,22 @@ void RageDisplay_D3D11::DrawQuadsInternal( const RageSpriteVertex v[], int iNumV
 	ASSERT(SUCCEEDED(hr));
 
 	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-	PrepareVertexBuffers(v, iNumVerts);
-
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// TODO rest of rendering state
-	SendCurrentMatrices();
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
 
-	m_pDeviceContext->Draw(iNumNewVerts, 0);
+	m_pDeviceContext->DrawIndexed(iNumNewVerts, 0, 0);
 }
 
 void RageDisplay_D3D11::DrawQuadStripInternal( const RageSpriteVertex v[], int iNumVerts )
 {
 	// there isn't a quad strip primitive in D3D11, so we have to fake it
 	// but it seems that quad strip is pretty much identical to triangle strip
-	PrepareVertexBuffers(v, iNumVerts);
-
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-	// TODO rest of rendering state
-	SendCurrentMatrices();
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
 
 	m_pDeviceContext->Draw(iNumVerts, 0);
 }
@@ -989,15 +1171,12 @@ void RageDisplay_D3D11::DrawSymmetricQuadStripInternal( const RageSpriteVertex v
 	ASSERT(SUCCEEDED(hr));
 
 	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-	PrepareVertexBuffers(v, iNumVerts);
-
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// TODO rest of rendering state
-	SendCurrentMatrices();
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
 
-	m_pDeviceContext->Draw(iNumNewVerts, 0);
+	m_pDeviceContext->DrawIndexed(iNumNewVerts, 0, 0);
 }
 
 void RageDisplay_D3D11::DrawFanInternal( const RageSpriteVertex v[], int iNumVerts )
@@ -1032,65 +1211,40 @@ void RageDisplay_D3D11::DrawFanInternal( const RageSpriteVertex v[], int iNumVer
 	ASSERT(SUCCEEDED(hr));
 
 	m_pDeviceContext->IASetIndexBuffer(pTempIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-	PrepareVertexBuffers(v, iNumVerts);
-
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// TODO rest of rendering state
-	SendCurrentMatrices();
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
 
-	m_pDeviceContext->Draw(iNumNewVerts, 0);
+	m_pDeviceContext->DrawIndexed(iNumNewVerts, 0, 0);
 }
 
 void RageDisplay_D3D11::DrawStripInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	PrepareVertexBuffers(v, iNumVerts);
-
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
-	// TODO rest of rendering state
-	SendCurrentMatrices();
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
 
 	m_pDeviceContext->Draw(iNumVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawTrianglesInternal( const RageSpriteVertex v[], int iNumVerts )
 {
-	PrepareVertexBuffers(v, iNumVerts);
-
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// TODO rest of rendering state
-	SendCurrentMatrices();
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
 
 	m_pDeviceContext->Draw(iNumVerts, 0);
 }
 
 void RageDisplay_D3D11::DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex )
 {
-	SendCurrentMatrices();
+	m_pDeviceContext->IASetInputLayout(m_pModelInputLayout.Get());
 
-	/* If lighting is off, then the current material will have no effect. We
-	 * want to still be able to color models with lighting off, so shove the
-	 * material color in texture factor and modify the texture stage to use it
-	 * instead of the vertex color (our models don't have vertex coloring anyway). */
-	DWORD bLighting;
-	g_pd3dDevice->GetRenderState( D3DRS_LIGHTING, &bLighting );
-
-	if( !bLighting )
-	{
-		g_pd3dDevice->SetTextureStageState( 0, D3DTSS_COLORARG2, D3DTA_TFACTOR );
-		g_pd3dDevice->SetTextureStageState( 0, D3DTSS_ALPHAARG2, D3DTA_TFACTOR );
-	}
-
+	BindRenderingState();
 	p->Draw( iMeshIndex );
-
-	if( !bLighting )
-	{
-		g_pd3dDevice->SetTextureStageState( 0, D3DTSS_COLORARG2, D3DTA_CURRENT );
-		g_pd3dDevice->SetTextureStageState( 0, D3DTSS_ALPHAARG2, D3DTA_CURRENT );
-	}
 }
 
 /* Use the default poly-based implementation.  D3D lines apparently don't support
@@ -1120,35 +1274,33 @@ void RageDisplay_D3D11::ClearAllTextures()
 
 int RageDisplay_D3D11::GetNumTextureUnits()
 {
-	return MAX_TEXTURES;
+	return D3D11_MAX_TEXTURES;
 }
 
 void RageDisplay_D3D11::SetTexture( TextureUnit tu, std::uintptr_t iTexture )
 {
 	unsigned int idx = static_cast<unsigned int>(tu);
-	if( idx >= MAX_TEXTURES )	// not supported
+	if( idx >= D3D11_MAX_TEXTURES )	// not supported
 		return;
 
-	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexture);
-
-	if( m_pTextures[idx] != pTex )
+	if( m_iTextures[idx] != iTexture)
 	{
-		m_bTexturesChanged[idx] = true;
-		m_pTextures[idx] = pTex;
+		m_bTexturesChanged = true;
+		m_iTextures[idx] = iTexture;
 	}
 }
 
 void RageDisplay_D3D11::SetTextureMode( TextureUnit tu, TextureMode tm )
 {
 	unsigned int idx = static_cast<unsigned int>(tu);
-	if( idx >= MAX_TEXTURES )	// not supported
+	if( idx >= D3D11_MAX_TEXTURES )	// not supported
 		return;
 
 	ASSERT_M(tm < NUM_TextureMode, ssprintf("Invalid TextureMode: %i", tm));
 
 	if( m_TextureModes[idx] != tm )
 	{
-		m_bTextureModesChanged[idx] = true;
+		m_bTexturesChanged = true;
 		m_TextureModes[idx] = tm;
 	}
 }
@@ -1156,14 +1308,14 @@ void RageDisplay_D3D11::SetTextureMode( TextureUnit tu, TextureMode tm )
 void RageDisplay_D3D11::SetTextureFiltering( TextureUnit tu, bool b )
 {
 	unsigned int idx = static_cast<unsigned int>(tu);
-	if( idx >= MAX_TEXTURES )	// not supported
+	if( idx >= D3D11_MAX_TEXTURES )	// not supported
 		return;
 
 	// TODO maybe should be D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT?
 	D3D11_FILTER filter = b ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_MIN_MAG_MIP_POINT;
 	if( m_SamplerStates[idx].Filter != filter )
 	{
-		m_bSamplerStateChanged[idx] = true;
+		m_bTexturesChanged = true;
 		m_SamplerStates[idx].Filter = filter;
 	}
 }
@@ -1285,7 +1437,6 @@ void RageDisplay_D3D11::SetZBias( float f )
 
 bool RageDisplay_D3D11::IsZTestEnabled() const
 {
-	// TODO should probably be disabled by default
 	return m_DepthStencilDesc.DepthEnable == TRUE && m_DepthStencilDesc.DepthFunc != D3D11_COMPARISON_ALWAYS;
 }
 
@@ -1337,13 +1488,13 @@ void RageDisplay_D3D11::ClearZBuffer()
 void RageDisplay_D3D11::SetTextureWrapping( TextureUnit tu, bool b )
 {
 	unsigned int idx = static_cast<unsigned int>(tu);
-	if( idx >= MAX_TEXTURES )	// not supported
+	if( idx >= D3D11_MAX_TEXTURES )	// not supported
 		return;
 
 	D3D11_TEXTURE_ADDRESS_MODE mode = b ? D3D11_TEXTURE_ADDRESS_WRAP : D3D11_TEXTURE_ADDRESS_CLAMP;
 	if( m_SamplerStates[idx].AddressU != mode )
 	{
-		m_bSamplerStateChanged[idx] = true;
+		m_bTexturesChanged = true;
 		m_SamplerStates[idx].AddressU = mode;
 		m_SamplerStates[idx].AddressV = mode;
 	}
@@ -1357,22 +1508,19 @@ void RageDisplay_D3D11::SetMaterial(
 	float shininess
 	)
 {
+	m_bConstantBufferVSChanged = true;
+
 	/* If lighting is off, then the current material will have no effect.
 	 * We want to still be able to color models with lighting off, so shove the
 	 * material color in texture factor and modify the texture stage to use it
 	 * instead of the vertex color (our models don't have vertex coloring anyway). */
-	DWORD bLighting;
-	g_pd3dDevice->GetRenderState( D3DRS_LIGHTING, &bLighting );
-
-	if( bLighting )
+	if( m_bLightingEnabled )
 	{
-		D3DMATERIAL9 mat;
-		memcpy( &mat.Diffuse, diffuse, sizeof(float)*4 );
-		memcpy( &mat.Ambient, ambient, sizeof(float)*4 );
-		memcpy( &mat.Specular, specular, sizeof(float)*4 );
-		memcpy( &mat.Emissive, emissive, sizeof(float)*4 );
-		mat.Power = shininess;
-		g_pd3dDevice->SetMaterial( &mat );
+		std::memcpy( &m_ConstantBufferVS.materialDiffuse, diffuse, sizeof(m_ConstantBufferVS.materialDiffuse) );
+		std::memcpy( &m_ConstantBufferVS.materialAmbient, ambient, sizeof(m_ConstantBufferVS.materialAmbient) );
+		std::memcpy( &m_ConstantBufferVS.materialSpecular, specular, sizeof(m_ConstantBufferVS.materialSpecular) );
+		std::memcpy( &m_ConstantBufferVS.materialEmission, emissive, sizeof(m_ConstantBufferVS.materialEmission) );
+		m_ConstantBufferVS.materialShininess = shininess;
 	}
 	else
 	{
@@ -1380,22 +1528,24 @@ void RageDisplay_D3D11::SetMaterial(
 		c.r += emissive.r + ambient.r;
 		c.g += emissive.g + ambient.g;
 		c.b += emissive.b + ambient.b;
-		RageVColor c2 = c;
-		DWORD c3 = *(DWORD*)&c2;
-		g_pd3dDevice->SetRenderState( D3DRS_TEXTUREFACTOR, c3 );
+		std::memcpy( &m_ConstantBufferVS.noLightingMaterialColor, &c, sizeof(m_ConstantBufferVS.noLightingMaterialColor) );
 	}
 }
 
 void RageDisplay_D3D11::SetLighting( bool b )
 {
-	m_bLightingEnabled = true;
+	if (m_bLightingEnabled != b)
+	{
+		m_bLightsChanged = true;
+		m_bLightingEnabled = b;
+	}
 }
 
 void RageDisplay_D3D11::SetLightOff( int index )
 {
 	if( m_bLightsEnabled[index] )
 	{
-		m_bLightsChanged[index] = true;
+		m_bLightsChanged = true;
 		m_bLightsEnabled[index] = false;
 	}
 }
@@ -1407,12 +1557,12 @@ void RageDisplay_D3D11::SetLightDirectional(
 	const RageColor &specular,
 	const RageVector3 &dir )
 {
-	m_bLightsChanged[index] = true;
+	m_bLightsChanged = true;
 	m_bLightsEnabled[index] = true;
-	memcpy( &m_Lights[index].ambient, ambient, sizeof(ambient) );
-	memcpy( &m_Lights[index].diffuse, diffuse, sizeof(diffuse) );
-	memcpy( &m_Lights[index].specular, specular, sizeof(specular) );
-	memcpy( &m_Lights[index].direction, dir, sizeof(dir) );
+	std::memcpy( &m_Lights[index].ambient, ambient, sizeof(ambient) );
+	std::memcpy( &m_Lights[index].diffuse, diffuse, sizeof(diffuse) );
+	std::memcpy( &m_Lights[index].specular, specular, sizeof(specular) );
+	std::memcpy( &m_Lights[index].direction, dir, sizeof(dir) );
 
 #if 0
 	// TODO Do I need to flip Z like in D3D9???

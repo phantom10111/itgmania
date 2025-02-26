@@ -11,6 +11,10 @@
 
 #include <cstdint>
 
+// TODO how many lights?
+#define D3D11_MAX_LIGHTS 8u
+#define D3D11_MAX_TEXTURES 4u
+
 class RageDisplay_D3D11: public RageDisplay
 {
 public:
@@ -98,7 +102,8 @@ protected:
 	RageSurface* CreateScreenshot();
 	RageMatrix GetOrthoMatrix( float l, float r, float b, float t, float zn, float zf );
 
-	void SendCurrentMatrices();
+	void BindRenderingState();
+	void BindVertexBuffers( const RageSpriteVertex v[], int iNumVerts );
 
 	bool m_bAllowTearing = false;
 
@@ -112,6 +117,14 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pRenderTarget;
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;
+	// TODO delegate this to a separate pipeline object
+	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pModelVertexShader;
+	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pSpriteVertexShader;
+	Microsoft::WRL::ComPtr<ID3D11PixelShader> m_pBuiltinPixelShader;
+	Microsoft::WRL::ComPtr<ID3D11InputLayout> m_pModelInputLayout;
+	Microsoft::WRL::ComPtr<ID3D11InputLayout> m_pSpriteInputLayout;
+	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pConstantBufferVS;
+	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pConstantBufferPS;
 
 	UINT m_iRenderTargetHeight;
 	UINT m_iRenderTargetWidth;
@@ -121,15 +134,15 @@ protected:
 
 	// TODO suboptimal shit, proof of concept for now
 	// fixing requires pretty big refactor of how Actor::DrawPrimitives() work
+	bool m_bRasterizerStateChanged = false;
+	D3D11_RASTERIZER_DESC m_RasterizerDesc = CD3D11_RASTERIZER_DESC(CD3D11_DEFAULT{});
+
 	BlendMode m_CurrentBlendMode = BLEND_COPY_SRC;
 	bool m_bBlendStateChanged = false;
 	D3D11_BLEND_DESC m_BlendDesc = CD3D11_BLEND_DESC(CD3D11_DEFAULT{});
 
 	bool m_bDepthStateChanged = false;
 	D3D11_DEPTH_STENCIL_DESC m_DepthStencilDesc = CD3D11_DEPTH_STENCIL_DESC(CD3D11_DEFAULT{});
-
-	bool m_bRasterizerStateChanged = false;
-	D3D11_RASTERIZER_DESC m_RasterizerDesc = CD3D11_RASTERIZER_DESC(CD3D11_DEFAULT{});
 
 	struct LightData
 	{
@@ -139,10 +152,10 @@ protected:
 		DirectX::XMFLOAT3A direction;
 	};
 
+	bool m_bLightsChanged = false;
 	bool m_bLightingEnabled = false;
-	bool m_bLightsChanged[MAX_LIGHTS];
-	bool m_bLightsEnabled[MAX_LIGHTS];
-	LightData m_Lights[MAX_LIGHTS];
+	bool m_bLightsEnabled[D3D11_MAX_LIGHTS];
+	LightData m_Lights[D3D11_MAX_LIGHTS];
 
 	bool m_bConstantBufferVSChanged = true; // Changed because no buffer is bound by default
 	struct ConstantsVS
@@ -157,17 +170,15 @@ protected:
 		DirectX::XMFLOAT4A materialDiffuse;
 		DirectX::XMFLOAT4A materialSpecular;
 		DirectX::XMFLOAT4A materialEmission;
-		LightData lights[MAX_LIGHTS];
+		LightData lights[D3D11_MAX_LIGHTS];
 	} m_ConstantBufferVS;
 
-	bool m_bSamplerStateChanged[MAX_TEXTURES];
-	D3D11_SAMPLER_DESC m_SamplerStates[MAX_TEXTURES];
-
-	bool m_bTexturesChanged[MAX_TEXTURES];
-	struct RageTexture_D3D11* m_pTextures[MAX_TEXTURES];
-
-	bool m_bTextureModesChanged[MAX_TEXTURES];
-	TextureMode m_TextureModes[MAX_TEXTURES];
+	bool m_bTexturesChanged = false;
+	bool m_bSamplerStateChanged[D3D11_MAX_TEXTURES];
+	D3D11_SAMPLER_DESC m_SamplerStates[D3D11_MAX_TEXTURES];
+	Microsoft::WRL::ComPtr<ID3D11SamplerState> m_pSamplerStates[D3D11_MAX_TEXTURES];
+	std::uintptr_t m_iTextures[D3D11_MAX_TEXTURES];
+	TextureMode m_TextureModes[D3D11_MAX_TEXTURES];
 
 	bool m_bConstantBufferPSChanged = true; // Changed because no buffer is bound by default
 	struct ConstantsPS

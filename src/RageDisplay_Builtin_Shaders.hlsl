@@ -1,6 +1,3 @@
-#define MAX_LIGHTS 8u /* TODO how many lights??? */
-#define MAX_TEXTURES 4u
-
 #define TEXTURE_SHIFT 2u
 #define TEXTURE_MASK ((1u << TEXTURE_SHIFT) - 1u)
 
@@ -12,9 +9,17 @@ struct VertexData
 {
 	float3 position : SV_Position;
 	float3 normal : NORMAL;
+#if VERTEX_HAS_COLOR
 	float3 color : COLOR;
+#endif
 	float2 texcoord : TEXCOORD;
 };
+
+#if VERTEX_HAS_COLOR
+#define VERTEX_COLOR vertexData.color
+#else
+#define VERTEX_COLOR float3(1.f, 1.f, 1.f)
+#endif
 
 struct FragmentData
 {
@@ -79,11 +84,10 @@ FragmentData VSMain(VertexData vertexData)
 		lightingSpecular *= materialSpecular;
 	}
 	else
-		// TODO should we hande this special case when lighting is disabled differently?
 		lightingAmbient = noLightingMaterialColor;
 
 	// TODO should fragmentData.color be float4 and include alpha?
-	fragmentData.color = vertexData.color * (lightingAmbient + lightingDiffuse + lightingSpecular).rgb;
+	fragmentData.color = VERTEX_COLOR * (lightingAmbient + lightingDiffuse + lightingSpecular).rgb;
 	fragmentData.texcoord = vertexData.texcoord; // TODO texcoord transform
 	return fragmentData;
 }
@@ -110,6 +114,7 @@ static const SamplerState samplers[MAX_TEXTURES] = { sampler0, sampler1, sampler
 
 float4 PSMain(FragmentData fragmentData) : SV_Target
 {
+	// TODO should fragmentData.color be float4 and include alpha?
 	float4 color = float4(fragmentData.color, 1.f);
 
 	[unroll(MAX_TEXTURES)]
