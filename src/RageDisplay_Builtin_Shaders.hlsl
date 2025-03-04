@@ -13,6 +13,9 @@ struct VertexData
 	float3 color : COLOR;
 #endif
 	float2 texcoord : TEXCOORD;
+#if VERTEX_HAS_TEXTURE_MATRIX_SCALE
+	float2 textureMatrixScale : TEXCOORD1;
+#endif
 };
 
 #if VERTEX_HAS_COLOR
@@ -25,7 +28,7 @@ struct FragmentData
 {
 	float4 position : SV_Position;
 	float3 color : COLOR;
-	float2 texcoord : TEXCOORD;
+	float4 texcoord : TEXCOORD;
 };
 
 struct LightData
@@ -40,6 +43,7 @@ cbuffer ConstantsVS : register(b0)
 {
 	float4x4 vertexTransform;
 	float3x3 normalTransform;
+	float4x4 texcoordTransform;
 	uint numLights;
 	float materialShininess;
 	float4 noLightingMaterialColor;
@@ -66,7 +70,7 @@ FragmentData VSMain(VertexData vertexData)
 	if (LIGHTING_ENABLED)
 	{
 		lightingAmbient = float4(0.f, 0.f, 0.f, 0.f);
-		const float3 normal = mul(normalTransform, vertexData.normal);
+		const float3 normal = normalize(mul(normalTransform, vertexData.normal));
 
 		for (uint i = 0u; i < NUM_LIGHTS; ++i)
 		{
@@ -88,7 +92,15 @@ FragmentData VSMain(VertexData vertexData)
 
 	// TODO should fragmentData.color be float4 and include alpha?
 	fragmentData.color = VERTEX_COLOR * (lightingAmbient + lightingDiffuse + lightingSpecular).rgb;
-	fragmentData.texcoord = vertexData.texcoord; // TODO texcoord transform
+
+	const float4 texcoordIn = float4(vertexData.texcoord, 0.f, 1.f);
+	const float4 transformedTexcoord = mul(texcoordTransform, texcoordIn);
+#if VERTEX_HAS_TEXTURE_MATRIX_SCALE
+	fragmentData.texcoord = lerp(texcoordIn, transformedTexcoord, float4(vertexData.textureMatrixScale, 1.f, 1.f));
+#else
+	fragmentData.texcoord = transformedTexcoord;
+#endif
+
 	return fragmentData;
 }
 
@@ -116,12 +128,13 @@ float4 PSMain(FragmentData fragmentData) : SV_Target
 {
 	// TODO should fragmentData.color be float4 and include alpha?
 	float4 color = float4(fragmentData.color, 1.f);
+	const float2 transformedTexcoord = fragmentData.texcoord.xy / fragmentData.texcoord.w;
 
 	[unroll(MAX_TEXTURES)]
 	for (uint i = 0u; i < numTextures; ++i)
 	{
 		const uint textureMode = (textureModes >> (i * TEXTURE_SHIFT)) & TEXTURE_MASK;
-		const float4 textureColor = textures[i].Sample(samplers[i], fragmentData.texcoord);
+		const float4 textureColor = textures[i].Sample(samplers[i], transformedTexcoord);
 		switch (textureMode)
 		{
 			case TEXTURE_MODE_MODULATE:

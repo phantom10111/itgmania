@@ -220,3 +220,11 @@ list(APPEND SMDATA_ALL_RAGE_HPP
             ${SMDATA_RAGE_MISC_HPP}
             ${SMDATA_RAGE_SOUND_HPP}
             ${SMDATA_RAGE_UTILS_HPP})
+
+if(WIN32)
+  # TODO this sucks, doesn't rebuild the header file when necessary and always touches the file on generate etc.
+  file(READ "RageDisplay_Builtin_Shaders.hlsl" SHADER_SOURCE_HEX HEX)
+  string(APPEND SHADER_SOURCE_HEX "00")
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1, " SHADER_SOURCE_ARRAY "${SHADER_SOURCE_HEX}")
+  file(WRITE "${SM_GENERATED_SRC_DIR}/RageDisplay_Builtin_Shaders.h" "${SHADER_SOURCE_ARRAY}")
+endif()

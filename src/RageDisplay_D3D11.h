@@ -97,11 +97,13 @@ protected:
 	void DrawTrianglesInternal( const RageSpriteVertex v[], int iNumVerts );
 	void DrawSymmetricQuadStripInternal( const RageSpriteVertex v[], int iNumVerts );
 	void DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex );
+	void DrawLineStripInternal( const RageSpriteVertex v[], int iNumVerts, float LineWidth );
 
 	RString TryVideoMode( const VideoModeParams &p, bool &bNewDeviceOut );
 	RageSurface* CreateScreenshot();
 	RageMatrix GetOrthoMatrix( float l, float r, float b, float t, float zn, float zf );
 
+	void UpdateTransforms();
 	void BindRenderingState();
 	void BindVertexBuffers( const RageSpriteVertex v[], int iNumVerts );
 
@@ -119,9 +121,11 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;
 	// TODO delegate this to a separate pipeline object
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pModelVertexShader;
+	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pModelTextureMatrixScaleVertexShader;
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pSpriteVertexShader;
 	Microsoft::WRL::ComPtr<ID3D11PixelShader> m_pBuiltinPixelShader;
 	Microsoft::WRL::ComPtr<ID3D11InputLayout> m_pModelInputLayout;
+	Microsoft::WRL::ComPtr<ID3D11InputLayout> m_pModelTextureMatrixScaleInputLayout;
 	Microsoft::WRL::ComPtr<ID3D11InputLayout> m_pSpriteInputLayout;
 	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pConstantBufferVS;
 	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pConstantBufferPS;
@@ -158,11 +162,12 @@ protected:
 	LightData m_Lights[D3D11_MAX_LIGHTS];
 
 	bool m_bConstantBufferVSChanged = true; // Changed because no buffer is bound by default
-	struct ConstantsVS
+	struct alignas(16) ConstantsVS
 	{
 		DirectX::XMFLOAT4X4A vertexTransform;
 		// 4th column of normalTransform is not used but it's here to get correct alignment
 		DirectX::XMFLOAT3X4A normalTransform;
+		DirectX::XMFLOAT4X4A texcoordTransform;
 		std::uint32_t numLights;
 		float materialShininess;
 		DirectX::XMFLOAT4A noLightingMaterialColor;
@@ -181,7 +186,7 @@ protected:
 	TextureMode m_TextureModes[D3D11_MAX_TEXTURES];
 
 	bool m_bConstantBufferPSChanged = true; // Changed because no buffer is bound by default
-	struct ConstantsPS
+	struct alignas(16) ConstantsPS
 	{
 		std::uint32_t numTextures;
 		std::uint32_t textureModes;

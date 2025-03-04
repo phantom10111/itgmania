@@ -19,6 +19,11 @@
 // Static libraries
 #if defined(_MSC_VER)
 	#pragma comment(lib, "d3d11.lib")
+	#pragma comment(lib, "d3dcompiler.lib")
+	#pragma comment(lib, "dxgi.lib")
+#ifdef DEBUG
+	#pragma comment(lib, "dxguid.lib")
+#endif
 #endif
 
 #include <dxgidebug.h>
@@ -32,6 +37,10 @@
 #include <list>
 #include <vector>
 
+
+static constexpr const char BUILTIN_SHADER[] = {
+#include "RageDisplay_Builtin_Shaders.h"
+};
 
 // TODO: Instead of defining this here, enumerate the possible formats and select whatever one we want to use. This format should
 // be fine for the uses of this application though.
@@ -125,6 +134,9 @@ RageDisplay_D3D11::RageDisplay_D3D11()
 	m_Viewport.TopLeftY = 0;
 	m_Viewport.MinDepth = 0.05f;
 	m_Viewport.MaxDepth = 1.f;
+
+	m_bRasterizerStateChanged = true;
+	m_RasterizerDesc.AntialiasedLineEnable = TRUE;
 
 	for (int i = 0; i < D3D11_MAX_LIGHTS; ++i)
 		m_bLightsEnabled[i] = false;
@@ -233,8 +245,12 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		}
 	}
 
-	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0);
+	// TODO D3D11_CREATE_DEVICE_DEBUG requires D3D11*SDKLayers.dll installed
+	// TODO D3D11_CREATE_DEVICE_DEBUGGABLE requires requires D3D11_1SDKLayers.dll installed and feature level 11_1
+	// const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0);
+	const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG : 0);
 	const D3D_DRIVER_TYPE driverType = pDxgiAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+	// TODO 11_1 or 11_0?
 	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
 	hr = D3D11CreateDevice(
 		pDxgiAdapter.Get(),
@@ -335,38 +351,46 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 
 #define QUOTE(x) QUOTE2(x)
 #define QUOTE2(x) #x
-	D3D_SHADER_MACRO shaderDefinitions[] = { {"MAX_LIGHTS", QUOTE(D3D11_MAX_LIGHTS)}, {"MAX_TEXTURES", QUOTE(D3D11_MAX_TEXTURES)}, {"VERTEX_HAS_COLOR", "0"}, {nullptr, nullptr} };
+	D3D_SHADER_MACRO shaderDefinitions[] = { {"MAX_LIGHTS", QUOTE(D3D11_MAX_LIGHTS)}, {"MAX_TEXTURES", QUOTE(D3D11_MAX_TEXTURES)}, {"VERTEX_HAS_COLOR", "0"}, {"VERTEX_HAS_TEXTURE_MATRIX_SCALE", "0"}, {nullptr, nullptr} };
 #undef QUOTE
 #undef QUOTE2
 
-	Microsoft::WRL::ComPtr<ID3DBlob> pErrorMsgs;
-	Microsoft::WRL::ComPtr<ID3DBlob> pModelVSBytecode;
-
 	const UINT shaderCompileFlags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS | (bDebugShaders ? (D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION) : D3DCOMPILE_OPTIMIZATION_LEVEL3);
-	hr = D3DCompile(TODO, TODO, "builtin model shader vs", shaderDefinitions, nullptr, "VSMain", "vs_5_0", shaderCompileFlags, 0, &pModelVSBytecode, &pErrorMsgs);
-	if (!SUCCEEDED(hr))
-	{
-		char buffer[1024];
-		ASSERT(FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, nullptr, hr, MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), buffer, sizeof(buffer), nullptr));
-		return ssprintf("Compiling shader \"%s\":D3DCompile failed %ul(%s): %s", shaderName, hr, buffer, pErrorMsgs->GetBufferPointer());
-	}
+
+	Microsoft::WRL::ComPtr<ID3DBlob> pErrorMsgs;
+
+#define COMPILE_SHADER(name, source, entryPoint, target, outBytecode) \
+	do { \
+		hr = D3DCompile(source, sizeof(source), name, shaderDefinitions, nullptr, entryPoint, target, shaderCompileFlags, 0, outBytecode, &pErrorMsgs); \
+		if (!SUCCEEDED(hr)) \
+		{ \
+			char buffer[1024]; \
+			ASSERT(FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, nullptr, hr, MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), buffer, sizeof(buffer), nullptr)); \
+			return ssprintf("Compiling shader \"%s\":D3DCompile failed %lu(%s): %s", name, hr, buffer, pErrorMsgs->GetBufferPointer()); \
+		} \
+	} while (false)
+
+	Microsoft::WRL::ComPtr<ID3DBlob> pModelVSBytecode;
+	COMPILE_SHADER("builtin model vs", BUILTIN_SHADER, "VSMain", "vs_5_0", &pModelVSBytecode);
+
+	shaderDefinitions[3].Definition = "1"; // #define VERTEX_HAS_TEXTURE_MATRIX_SCALE 1
+	Microsoft::WRL::ComPtr<ID3DBlob> pModelTextureMatrixScaleVSBytecode;
+	COMPILE_SHADER("builtin model with texture matrix scale vs", BUILTIN_SHADER, "VSMain", "vs_5_0", &pModelTextureMatrixScaleVSBytecode);
 
 	shaderDefinitions[2].Definition = "1"; // #define VERTEX_HAS_COLOR 1
+	shaderDefinitions[3].Definition = "0"; // #define VERTEX_HAS_TEXTURE_MATRIX_SCALE 0
 	Microsoft::WRL::ComPtr<ID3DBlob> pSpriteVSBytecode;
-	hr = D3DCompile(TODO, TODO, "builtin sprite shader vs", shaderDefinitions, nullptr, "VSMain", "vs_5_0", shaderCompileFlags, 0, &pSpriteVSBytecode, &pErrorMsgs);
-	if (!SUCCEEDED(hr))
-	{
-		TODO;
-	}
+	COMPILE_SHADER("builtin sprite vs", BUILTIN_SHADER, "VSMain", "vs_5_0", &pSpriteVSBytecode);
 
 	Microsoft::WRL::ComPtr<ID3DBlob> pBuiltinPSBytecode;
-	hr = D3DCompile(TODO, TODO, "builtin shader ps", shaderDefinitions, nullptr, "PSMain", "ps_5_0", shaderCompileFlags, 0, &pBuiltinPSBytecode, &pErrorMsgs);
-	if (!SUCCEEDED(hr))
-	{
-		TODO;
-	}
+	COMPILE_SHADER("builtin ps", BUILTIN_SHADER, "PSMain", "ps_5_0", &pBuiltinPSBytecode);
+
+#undef COMPILE_SHADER
 
 	hr = m_pDevice->CreateVertexShader(pModelVSBytecode->GetBufferPointer(), pModelVSBytecode->GetBufferSize(), nullptr, &m_pModelVertexShader);
+	ASSERT(SUCCEEDED(hr));
+
+	hr = m_pDevice->CreateVertexShader(pModelTextureMatrixScaleVSBytecode->GetBufferPointer(), pModelTextureMatrixScaleVSBytecode->GetBufferSize(), nullptr, &m_pModelTextureMatrixScaleVertexShader);
 	ASSERT(SUCCEEDED(hr));
 
 	hr = m_pDevice->CreateVertexShader(pSpriteVSBytecode->GetBufferPointer(), pSpriteVSBytecode->GetBufferSize(), nullptr, &m_pSpriteVertexShader);
@@ -375,20 +399,24 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	hr = m_pDevice->CreatePixelShader(pBuiltinPSBytecode->GetBufferPointer(), pBuiltinPSBytecode->GetBufferSize(), nullptr, &m_pBuiltinPixelShader);
 	ASSERT(SUCCEEDED(hr));
 
+	static_assert(offsetof(RageModelVertex, p) == offsetof(RageSpriteVertex, p));
+	static_assert(offsetof(RageModelVertex, n) == offsetof(RageSpriteVertex, n));
 	D3D11_INPUT_ELEMENT_DESC inputElementDescs[4] = {
 		{"SV_Position", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageModelVertex, p), D3D11_INPUT_PER_VERTEX_DATA, 0},
 		{"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageModelVertex, n), D3D11_INPUT_PER_VERTEX_DATA, 0},
 		{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(RageModelVertex, t), D3D11_INPUT_PER_VERTEX_DATA, 0}
 	};
 
-	// TODO is it ok not to pass a shader here? Do I need to pass it? Should I pass it?
-	hr = m_pDevice->CreateInputLayout(inputElementDescs, 3, nullptr, 0, &m_pModelInputLayout);
+	hr = m_pDevice->CreateInputLayout(inputElementDescs, 3, pModelVSBytecode->GetBufferPointer(), pModelVSBytecode->GetBufferSize(), &m_pModelInputLayout);
+	ASSERT(SUCCEEDED(hr));
+
+	inputElementDescs[3] = {"TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT, 1, 0, D3D11_INPUT_PER_VERTEX_DATA, 0};
+	hr = m_pDevice->CreateInputLayout(inputElementDescs, 4, pModelTextureMatrixScaleVSBytecode->GetBufferPointer(), pModelTextureMatrixScaleVSBytecode->GetBufferSize(), &m_pModelTextureMatrixScaleInputLayout);
 	ASSERT(SUCCEEDED(hr));
 
 	inputElementDescs[2] = {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageSpriteVertex, c), D3D11_INPUT_PER_VERTEX_DATA, 0};
 	inputElementDescs[3] = {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(RageSpriteVertex, t), D3D11_INPUT_PER_VERTEX_DATA, 0};
-
-	hr = m_pDevice->CreateInputLayout(inputElementDescs, 4, nullptr, 0, &m_pSpriteInputLayout);
+	hr = m_pDevice->CreateInputLayout(inputElementDescs, 4, pSpriteVSBytecode->GetBufferPointer(), pSpriteVSBytecode->GetBufferSize(), &m_pSpriteInputLayout);
 	ASSERT(SUCCEEDED(hr));
 
 	D3D11_BUFFER_DESC bufferDesc;
@@ -446,7 +474,9 @@ void RageDisplay_D3D11::GetDisplaySpecs( DisplaySpecs &out ) const
 
 		std::unique_ptr<DXGI_MODE_DESC[]> pModes;
 		do {
-			pModes = std::make_unique_for_overwrite<DXGI_MODE_DESC[]>(numModes);
+			// TODO does MSVC not support this?
+			// pModes = std::make_unique_for_overwrite<DXGI_MODE_DESC[]>(numModes);
+			pModes = std::make_unique<DXGI_MODE_DESC[]>(numModes);
 			hr = pDxgiOutput->GetDisplayModeList(g_DefaultAdapterFormat, DXGI_ENUM_MODES_INTERLACED | DXGI_ENUM_MODES_SCALING, &numModes, pModes.get());
 		} while (hr == DXGI_ERROR_MORE_DATA);
 		ASSERT(SUCCEEDED(hr));
@@ -534,8 +564,8 @@ RString RageDisplay_D3D11::TryVideoMode( const VideoModeParams &p, bool &bNewDev
 	// TODO can we actually make use of mode switch? Need to call IDXGISwapChain::ResizeBuffers()
 	const UINT swapchainFlags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | (m_bAllowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
 	DXGI_SWAP_CHAIN_DESC1 swapchainDesc = {
-		p.width,
-		p.height,
+		static_cast<UINT>(p.width),
+		static_cast<UINT>(p.height),
 		format,
 		FALSE, // Stereo
 		{1, 0}, // DXGI_SAMPLE_DESC {Count, Quality}
@@ -549,7 +579,7 @@ RString RageDisplay_D3D11::TryVideoMode( const VideoModeParams &p, bool &bNewDev
 
 	//TODO perhaps we should use values from DXGI_MODE_DESC here
 	const DXGI_SWAP_CHAIN_FULLSCREEN_DESC fullscreenDesc = {
-		{p.rate, 1}, // DXGI_RATIONAL {Numerator, Denominator}
+		{static_cast<UINT>(p.rate), 1}, // DXGI_RATIONAL {Numerator, Denominator}
 		DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE,
 		DXGI_MODE_SCALING_STRETCHED,
 		p.windowed
@@ -618,6 +648,17 @@ int RageDisplay_D3D11::GetMaxTextureSize() const
 {
 	return D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
 }
+
+struct RageTexture_D3D11
+{
+	UINT m_iWidth;
+	UINT m_iHeight;
+	RagePixelFormat m_Pixfmt;
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pTexture;
+	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_pSRV;
+	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRTV;
+	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDSV; // If m_pTexture is a render target and a depth buffer was requested, this will be a DSV of the depth buffer (and not of m_pTexture)
+};
 
 bool RageDisplay_D3D11::BeginFrame()
 {
@@ -741,71 +782,56 @@ ActualVideoModeParams RageDisplay_D3D11::GetActualVideoModeParams() const
 	return GraphicsWindow::GetParams();
 }
 
-void RageDisplay_D3D11::SendCurrentMatrices()
+void RageDisplay_D3D11::UpdateTransforms()
 {
-	RageMatrix m;
-	RageMatrixMultiply( &m, GetCentering(), GetProjectionTop() );
+	// TODO we don't have any nice way to check if the matrices have changed
+	m_bConstantBufferVSChanged = true;
+	m_bConstantBufferPSChanged = true;
 
-	// Convert to OpenGL-style "pixel-centered" coords
-	RageMatrix m2 = GetCenteringMatrix( -0.5f, -0.5f, 0, 0 );
 	RageMatrix projection;
-	RageMatrixMultiply( &projection, &m2, &m );
-	g_pd3dDevice->SetTransform( D3DTS_PROJECTION, (D3DMATRIX*)&projection );
+	RageMatrixMultiply( &projection, GetCentering(), GetProjectionTop() );
 
-	g_pd3dDevice->SetTransform( D3DTS_VIEW, (D3DMATRIX*)GetViewTop() );
-	g_pd3dDevice->SetTransform( D3DTS_WORLD, (D3DMATRIX*)GetWorldTop() );
+	RageMatrix modelView;
+	RageMatrixMultiply( &modelView, GetWorldTop(), GetViewTop() );
 
-	FOREACH_ENUM( TextureUnit, tu )
-	{
-		// Optimization opportunity: Turn off texture transform if not using texture coords.
-		g_pd3dDevice->SetTextureStageState( tu, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2 );
+	// Transform to column-major
+	RageMatrix temp;
+	RageMatrixTranspose(&temp, &modelView);
 
-		// If no texture is set for this texture unit, don't bother setting it up.
-		IDirect3DBaseTexture9* pTexture = nullptr;
-		g_pd3dDevice->GetTexture( tu, &pTexture );
-		if( pTexture == nullptr )
-			 continue;
-		pTexture->Release();
+	// Clear out 4th row and column of the matrix to make the calculations approprate for transforming vectors
+	temp(3, 0) = 0.f;
+	temp(3, 1) = 0.f;
+	temp(3, 2) = 0.f;
+	temp(0, 3) = 0.f;
+	temp(1, 3) = 0.f;
+	temp(2, 3) = 0.f;
+	temp(3, 3) = 1.f;
 
-		if( g_bSphereMapping[tu] )
-		{
-			static const RageMatrix tex = RageMatrix
-			(
-				0.5f,   0.0f,  0.0f, 0.0f,
-				0.0f,  -0.5f,  0.0f, 0.0f,
-				0.0f,   0.0f,  0.0f, 0.0f,
-				0.5f,  -0.5f,  0.0f, 1.0f
-			);
-			g_pd3dDevice->SetTransform( (D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0+Enum::to_integral(tu)), (D3DMATRIX*)&tex );
+	// Move to DirectXMath
+	DirectX::XMMATRIX normalTransformInverse;
+	std::memcpy(&normalTransformInverse, &temp, sizeof(normalTransformInverse));
 
-			// Tell D3D to use transformed reflection vectors as texture co-ordinate 0
-			// and then transform this coordinate by the specified texture matrix.
-			g_pd3dDevice->SetTextureStageState( tu, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR );
-		}
-		else
-		{
-			/* Direct3D is expecting a 3x3 matrix loaded into the 4x4 in order
-			 * to transform the 2-component texture coordinates. We currently
-			 * only use translate and scale, and ignore the z component entirely,
-			 * so convert the texture matrix from 4x4 to 3x3 by dropping z. */
+	// Calculate inverse and make this the normal transform
+	DirectX::XMMATRIX normalTransform = DirectX::XMMatrixInverse(nullptr, normalTransformInverse);
+	std::memcpy(&m_ConstantBufferVS.normalTransform, &normalTransform, sizeof(m_ConstantBufferVS.normalTransform));
 
-			const RageMatrix &tex1 = *GetTextureTop();
-			const RageMatrix tex2 = RageMatrix
-			(
-				tex1.m[0][0], tex1.m[0][1],  tex1.m[0][3],	0,
-				tex1.m[1][0], tex1.m[1][1],  tex1.m[1][3],	0,
-				tex1.m[3][0], tex1.m[3][1],  tex1.m[3][3],	0,
-				0,				0,			0,		0
-			);
-			g_pd3dDevice->SetTransform( D3DTRANSFORMSTATETYPE(D3DTS_TEXTURE0+Enum::to_integral(tu)), (D3DMATRIX*)&tex2 );
+	RageMatrix modelViewProjection;
+	RageMatrixMultiply( &modelViewProjection, &modelView, &projection );
 
-			g_pd3dDevice->SetTextureStageState( tu, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_PASSTHRU );
-		}
-	}
+	// Transform to column-major
+	RageMatrixTranspose(&temp, &modelView);
+	std::memcpy(&m_ConstantBufferVS.vertexTransform, &temp, sizeof(m_ConstantBufferVS.vertexTransform));
+
+	// Transform to column-major
+	RageMatrixTranspose(&temp, GetTextureTop());
+	// Todo sphere environment mapping
+	std::memcpy(&m_ConstantBufferVS.texcoordTransform, &temp, sizeof(m_ConstantBufferVS.texcoordTransform));
 }
 
 void RageDisplay_D3D11::BindRenderingState()
 {
+	UpdateTransforms();
+
 	if (m_bRasterizerStateChanged)
 	{
 		m_bRasterizerStateChanged = false;
@@ -945,7 +971,9 @@ void RageDisplay_D3D11::BindVertexBuffers( const RageSpriteVertex v[], int iNumV
 	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempVertexBuffer);
 	ASSERT(SUCCEEDED(hr));
 
-	m_pDeviceContext->IASetVertexBuffers(0, 1, pTempVertexBuffer.GetAddressOf(), nullptr, nullptr);
+	UINT stride = sizeof(RageSpriteVertex);
+	UINT offset = 0;
+	m_pDeviceContext->IASetVertexBuffers(0, 1, pTempVertexBuffer.GetAddressOf(), &stride, &offset);
 }
 
 class RageCompiledGeometryD3D11 : public RageCompiledGeometry
@@ -1035,9 +1063,12 @@ public:
 		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		ID3D11Buffer* vertexBuffers[2] = { m_pVertexBuffer.Get(), m_pVertexTextureScaleBuffer.Get() };
-		m_pDeviceContext->IASetVertexBuffers(0, 2, vertexBuffers, nullptr, nullptr);
+		UINT strides[2] = {TODO, TODO};
+		UINT offsets[2] = {0, 0};
+		m_pDeviceContext->IASetVertexBuffers(0, 2, vertexBuffers, strides, offsets);
 
 		// TODO handle the texture matrix scale somehow
+#if 0
 		if( meshInfo.m_bNeedsTextureMatrixScale )
 		{
 			// Kill the texture translation.
@@ -1050,6 +1081,7 @@ public:
 
 			g_pd3dDevice->SetTransform( D3DTS_TEXTURE0, (D3DMATRIX*)&m );
 		}
+#endif
 
 		m_pDeviceContext->DrawIndexed(meshInfo.iTriangleCount * 3, meshInfo.iTriangleStart * 3, 0);
 	}
@@ -1247,24 +1279,21 @@ void RageDisplay_D3D11::DrawCompiledGeometryInternal( const RageCompiledGeometry
 	p->Draw( iMeshIndex );
 }
 
-/* Use the default poly-based implementation.  D3D lines apparently don't support
- * AA with greater-than-one widths. */
-/*
-void RageDisplay_D3D11::DrawLineStrip( const RageSpriteVertex v[], int iNumVerts, float LineWidth )
+void RageDisplay_D3D11::DrawLineStripInternal( const RageSpriteVertex v[], int iNumVerts, float LineWidth )
 {
-	ASSERT( iNumVerts >= 2 );
-	g_pd3dDevice->SetRenderState( D3DRS_POINTSIZE, *((DWORD*)&LineWidth) );	// funky cast.  See D3DRENDERSTATETYPE doc
-	g_pd3dDevice->SetVertexShader( D3DFVF_RageSpriteVertex );
-	SendCurrentMatrices();
-	g_pd3dDevice->DrawPrimitiveUP(
-		D3DPT_LINESTRIP, // PrimitiveType
-		iNumVerts-1, // PrimitiveCount,
-		v, // pVertexStreamZeroData,
-		sizeof(RageSpriteVertex)
-	);
+	// D3D11 doesn't support lines with width other than 1
+	if (LineWidth != 1.f)
+		return RageDisplay::DrawLineStripInternal(v, iNumVerts, LineWidth);
+
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP);
+
+	BindVertexBuffers(v, iNumVerts);
+	BindRenderingState();
+
+	m_pDeviceContext->Draw(iNumVerts, 0);
+
 	StatsAddVerts( iNumVerts );
 }
-*/
 
 void RageDisplay_D3D11::ClearAllTextures()
 {
@@ -1318,6 +1347,17 @@ void RageDisplay_D3D11::SetTextureFiltering( TextureUnit tu, bool b )
 		m_bTexturesChanged = true;
 		m_SamplerStates[idx].Filter = filter;
 	}
+}
+
+void RageDisplay_D3D11::SetEffectMode(EffectMode effect)
+{
+	// TODO
+}
+
+bool RageDisplay_D3D11::IsEffectModeSupported(EffectMode effect)
+{
+	// TODO
+	return false;
 }
 
 void RageDisplay_D3D11::SetBlendMode( BlendMode mode )
@@ -1599,17 +1639,6 @@ void RageDisplay_D3D11::SetCullMode( CullMode mode )
 	}
 }
 
-struct RageTexture_D3D11
-{
-	UINT m_iWidth;
-	UINT m_iHeight;
-	RagePixelFormat m_Pixfmt;
-	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pTexture;
-	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_pSRV;
-	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRTV;
-	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDSV; // If m_pTexture is a render target and a depth buffer was requested, this will be a DSV of the depth buffer (and not of m_pTexture)
-};
-
 std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* img,
@@ -1622,25 +1651,45 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	textureDesc.ArraySize = 1;
 	textureDesc.Format = DXGI_FORMATS[pixfmt];
 	textureDesc.SampleDesc = { 1, 0 };
-	textureDesc.Usage = D3D11_USAGE_DYNAMIC;
+	// if bGenerateMipMaps is true, assume this is a normal texture that won't be updated often and just give it D3D11_USAGE_DEFAULT and no CPU access
+	// but if bGenerateMipMaps is false it's probably something special (like a video texture for example) and give it D3D11_USAGE_DYNAMIC and CPU write access
+	// TODO - is this sensible? can we have a better way to determine appropriate usage for a texture? the choice made here is important, it will interact with RageTextureLock for example
+	textureDesc.Usage = bGenerateMipMaps ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
 	textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (bGenerateMipMaps ? D3D11_BIND_RENDER_TARGET: 0);
-	textureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	textureDesc.CPUAccessFlags = bGenerateMipMaps ? 0 : D3D11_CPU_ACCESS_WRITE;
 	textureDesc.MiscFlags = bGenerateMipMaps ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
 
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
 	HRESULT hr = m_pDevice->CreateTexture2D(&textureDesc, nullptr, &pTexture);
 	ASSERT(SUCCEEDED(hr));
 
-	D3D11_MAPPED_SUBRESOURCE mappedSubresource;
-	hr = m_pDeviceContext->Map(pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
-	ASSERT(SUCCEEDED(hr));
-
+	// TODO do we really need 2 separate paths here to update the texture?
+	// TODO this whole block is pretty much identical to RageDisplay_D3D11::UpdateTexture() (except for offset)
+	// TODO does it matter if we update the texture here or just give initial data to CreateTexture2D()?
 	const RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pixfmt];
-	RageSurface* pSurface = CreateSurfaceFrom(textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData), mappedSubresource.RowPitch);
-	RageSurfaceUtils::Blit(img, pSurface);
-	delete pSurface;
+	if (bGenerateMipMaps)
+	{
+		RageSurface* pSurface;
+		if(!RageSurfaceUtils::ConvertSurface(img, pSurface, textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3]))
+			pSurface = img;
 
-	m_pDeviceContext->Unmap(pTexture.Get(), 0);
+		//TODO UpdateSubresource1 with D3D11_COPY_DISCARD
+		m_pDeviceContext->UpdateSubresource(pTexture.Get(), 0, nullptr, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0);
+		if(pSurface != img)
+			delete pSurface;
+	}
+	else
+	{
+		D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+		hr = m_pDeviceContext->Map(pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+		ASSERT(SUCCEEDED(hr));
+
+		RageSurface* pSurface = CreateSurfaceFrom(textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData), mappedSubresource.RowPitch);
+		RageSurfaceUtils::Blit(img, pSurface);
+		delete pSurface;
+
+		m_pDeviceContext->Unmap(pTexture.Get(), 0);
+	}
 
 	Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> pSRV;
 	hr = m_pDevice->CreateShaderResourceView(pTexture.Get(), nullptr, &pSRV);
@@ -1663,17 +1712,41 @@ void RageDisplay_D3D11::UpdateTexture(
 	D3D11_TEXTURE2D_DESC textureDesc;
 	pTex->m_pTexture->GetDesc(&textureDesc);
 
-	ASSERT(xoffset + width <= textureDesc.Width);
-	ASSERT(yoffset + height <= textureDesc.Height);
+	ASSERT(static_cast<UINT>(xoffset + width) <= textureDesc.Width);
+	ASSERT(static_cast<UINT>(yoffset + height) <= textureDesc.Height);
 
-	D3D11_MAPPED_SUBRESOURCE mappedSubresource;
-	HRESULT hr = m_pDeviceContext->Map(pTex->m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
-	ASSERT(SUCCEEDED(hr));
-
+	// TODO do we really need 2 separate paths here to update the texture?
+	// TODO this whole block is pretty much identical to RageDisplay_D3D11::CreateTexture() (except for offset)
 	const RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pTex->m_Pixfmt];
-	RageSurface* pSurface = CreateSurfaceFrom(width, height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData) + xoffset * desc.bpp / 4 + yoffset * mappedSubresource.RowPitch, mappedSubresource.RowPitch);
-	RageSurfaceUtils::Blit(img, pSurface, width, height);
-	delete pSurface;
+	if (textureDesc.Usage == D3D11_USAGE_DEFAULT)
+	{
+		RageSurface* pSurface;
+		if (!RageSurfaceUtils::ConvertSurface(img, pSurface, textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3]))
+			pSurface = img;
+
+		D3D11_BOX box;
+		box.left = static_cast<UINT>(xoffset);
+		box.top = static_cast<UINT>(yoffset);
+		box.front = 0;
+		box.right = static_cast<UINT>(xoffset + width);
+		box.bottom = static_cast<UINT>(yoffset + height);
+		box.back = 0;
+
+		//TODO UpdateSubresource1 with D3D11_COPY_DISCARD
+		m_pDeviceContext->UpdateSubresource(pTex->m_pTexture.Get(), 0, &box, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0);
+		if (pSurface != img)
+			delete pSurface;
+	}
+	else
+	{
+		D3D11_MAPPED_SUBRESOURCE mappedSubresource;
+		HRESULT hr = m_pDeviceContext->Map(pTex->m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
+		ASSERT(SUCCEEDED(hr));
+
+		RageSurface* pSurface = CreateSurfaceFrom(width, height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData) + xoffset * desc.bpp / 4 + yoffset * mappedSubresource.RowPitch, mappedSubresource.RowPitch);
+		RageSurfaceUtils::Blit(img, pSurface, width, height);
+		delete pSurface;
+	}
 
 	m_pDeviceContext->Unmap(pTex->m_pTexture.Get(), 0);
 }
@@ -1739,7 +1812,7 @@ std::uintptr_t RageDisplay_D3D11::CreateRenderTarget(const RenderTargetParam& pa
 
 std::uintptr_t RageDisplay_D3D11::GetRenderTarget()
 {
-	reinterpret_cast<std::uintptr_t>(m_pCurrentRenderTarget);
+	return reinterpret_cast<std::uintptr_t>(m_pCurrentRenderTarget);
 }
 
 void RageDisplay_D3D11::SetRenderTarget(std::uintptr_t iHandle, bool bPreserveTexture)
@@ -1798,15 +1871,16 @@ struct RageTextureLock_D3D11 : public RageTextureLock
 
 		RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(iTexHandle);
 
+		// TODO in order to do the map, the texture must be D3D11_USAGE_DYNAMIC, we need to guarantee this somehow
 		D3D11_MAPPED_SUBRESOURCE mappedSubresource;
 		HRESULT hr = m_pDeviceContext->Map(m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
 		ASSERT(SUCCEEDED(hr));
 
 		D3D11_TEXTURE2D_DESC textureDesc;
 		pTex->m_pTexture->GetDesc(&textureDesc);
-		ASSERT(pSurface->w == textureDesc.Width);
-		ASSERT(pSurface->h == textureDesc.Height);
-		ASSERT(pSurface->pitch == mappedSubresource.RowPitch);
+		ASSERT(static_cast<UINT>(pSurface->w) == textureDesc.Width);
+		ASSERT(static_cast<UINT>(pSurface->h) == textureDesc.Height);
+		ASSERT(static_cast<UINT>(pSurface->pitch) == mappedSubresource.RowPitch);
 
 		const RageDisplay::RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pTex->m_Pixfmt];
 		ASSERT(desc.bpp == pSurface->fmt.BitsPerPixel);
@@ -1863,7 +1937,8 @@ RageMatrix RageDisplay_D3D11::GetOrthoMatrix( float l, float r, float b, float t
 
 void RageDisplay_D3D11::SetSphereEnvironmentMapping( TextureUnit tu, bool b )
 {
-	g_bSphereMapping[tu] = b;
+	// TODO
+	// g_bSphereMapping[tu] = b;
 }
 
 void RageDisplay_D3D11::SetCelShaded( int stage )
