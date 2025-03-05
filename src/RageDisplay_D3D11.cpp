@@ -434,6 +434,21 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	hr = m_pDevice->CreateBuffer(&bufferDesc, nullptr, &m_pConstantBufferPS);
 	ASSERT(SUCCEEDED(hr));
 
+	if (bDebugRenderer)
+	{
+		// By default all samplers are bound to NULL, which is equivalent to the default configuration.
+		// This is what we want but it generates a warning in debug configuration, so explicitly bind default samplers to silence the warning.
+		const D3D11_SAMPLER_DESC defaultSamplerDesc = CD3D11_SAMPLER_DESC(CD3D11_DEFAULT{});
+		Microsoft::WRL::ComPtr<ID3D11SamplerState> defaultSamplerState;
+		hr = m_pDevice->CreateSamplerState(&defaultSamplerDesc, &defaultSamplerState);
+		ASSERT(SUCCEEDED(hr));
+
+		for (unsigned i = 0; i < D3D11_MAX_TEXTURES; ++i)
+			m_pSamplerStates[i] = defaultSamplerState.Get();
+
+		m_pDeviceContext->PSSetSamplers(0, D3D11_MAX_TEXTURES, m_pSamplerStates[0].GetAddressOf());
+	}
+
 	//TODO fix comment
 	/* Up until now, all we've done is set up g_pd3d and do some queries. Now,
 	 * actually initialize the window. Do this after as many error conditions as
@@ -606,16 +621,9 @@ RString RageDisplay_D3D11::TryVideoMode( const VideoModeParams &p, bool &bNewDev
 
 void RageDisplay_D3D11::ResolutionChanged()
 {
-	HRESULT hr = m_pSwapchain->GetBuffer(0, IID_PPV_ARGS(&m_pRenderTarget));
-	// TODO maybe I need to handle device lost here instead of asserting success?
-	ASSERT(SUCCEEDED(hr));
-
-	hr = m_pDevice->CreateRenderTargetView(m_pRenderTarget.Get(), nullptr, &m_pRenderTargetView);
-	ASSERT(SUCCEEDED(hr));
-
 	DXGI_SWAP_CHAIN_DESC swapchainDesc;
 	// TODO does desc change on resolution change?
-	hr = m_pSwapchain->GetDesc(&swapchainDesc);
+	HRESULT hr = m_pSwapchain->GetDesc(&swapchainDesc);
 	ASSERT(SUCCEEDED(hr));
 
 	const D3D11_TEXTURE2D_DESC depthStencilDesc = {
@@ -664,6 +672,14 @@ bool RageDisplay_D3D11::BeginFrame()
 {
 	GraphicsWindow::Update();
 
+	// It's a bit silly to always create a new RTV for each frame but it seems to be D3D11 standard practice
+	HRESULT hr = m_pSwapchain->GetBuffer(0, IID_PPV_ARGS(&m_pRenderTarget));
+	// TODO maybe I need to handle device lost here instead of asserting success?
+	ASSERT(SUCCEEDED(hr));
+
+	hr = m_pDevice->CreateRenderTargetView(m_pRenderTarget.Get(), nullptr, &m_pRenderTargetView);
+	ASSERT(SUCCEEDED(hr));
+
 	static constexpr const float fClearColor[4] = { 0.f, 0.f, 0.f, 1.f };
 	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView.Get(), fClearColor);
 	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.f, 0);
@@ -671,6 +687,8 @@ bool RageDisplay_D3D11::BeginFrame()
 	m_Viewport.Width = m_iRenderTargetWidth;
 	m_Viewport.Height = m_iRenderTargetHeight;
 	m_pDeviceContext->RSSetViewports(1, &m_Viewport);
+
+	m_pDeviceContext->PSSetShader(m_pBuiltinPixelShader.Get(), nullptr, 0);
 
 	m_pDeviceContext->OMSetRenderTargets(1, m_pRenderTargetView.GetAddressOf(), m_pDepthStencilView.Get());
 
@@ -971,9 +989,11 @@ void RageDisplay_D3D11::BindVertexBuffers( const RageSpriteVertex v[], int iNumV
 	HRESULT hr = m_pDevice->CreateBuffer(&bufferDesc, &subresourceData, &pTempVertexBuffer);
 	ASSERT(SUCCEEDED(hr));
 
-	UINT stride = sizeof(RageSpriteVertex);
-	UINT offset = 0;
+	constexpr const UINT stride = sizeof(RageSpriteVertex);
+	constexpr const UINT offset = 0;
 	m_pDeviceContext->IASetVertexBuffers(0, 1, pTempVertexBuffer.GetAddressOf(), &stride, &offset);
+
+	m_pDeviceContext->VSSetShader(m_pSpriteVertexShader.Get(), nullptr, 0);
 }
 
 class RageCompiledGeometryD3D11 : public RageCompiledGeometry
@@ -1062,10 +1082,10 @@ public:
 		m_pDeviceContext->IASetIndexBuffer(m_pIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
 		m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-		ID3D11Buffer* vertexBuffers[2] = { m_pVertexBuffer.Get(), m_pVertexTextureScaleBuffer.Get() };
-		UINT strides[2] = {TODO, TODO};
-		UINT offsets[2] = {0, 0};
-		m_pDeviceContext->IASetVertexBuffers(0, 2, vertexBuffers, strides, offsets);
+		ID3D11Buffer* vertexBuffers[2] = {m_pVertexBuffer.Get(), m_pVertexTextureScaleBuffer.Get()};
+		constexpr const UINT strides[2] = {offsetof(RageModelVertex, bone), sizeof(RageVector2)};
+		constexpr const UINT offsets[2] = {0, 0};
+		m_pDeviceContext->IASetVertexBuffers(0, m_bAnyNeedsTextureMatrixScale ? 2 : 1, vertexBuffers, strides, offsets);
 
 		// TODO handle the texture matrix scale somehow
 #if 0
@@ -1273,7 +1293,16 @@ void RageDisplay_D3D11::DrawTrianglesInternal( const RageSpriteVertex v[], int i
 
 void RageDisplay_D3D11::DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex )
 {
-	m_pDeviceContext->IASetInputLayout(m_pModelInputLayout.Get());
+	if (p->NeedsTextureMatrixScale())
+	{
+		m_pDeviceContext->IASetInputLayout(m_pModelTextureMatrixScaleInputLayout.Get());
+		m_pDeviceContext->VSSetShader(m_pModelTextureMatrixScaleVertexShader.Get(), nullptr, 0);
+	}
+	else
+	{
+		m_pDeviceContext->IASetInputLayout(m_pModelInputLayout.Get());
+		m_pDeviceContext->VSSetShader(m_pModelVertexShader.Get(), nullptr, 0);
+	}
 
 	BindRenderingState();
 	p->Draw( iMeshIndex );
