@@ -1020,7 +1020,8 @@ public:
 
 	void Change( const std::vector<msMesh> &vMeshes )
 	{
-		std::vector<float> vVertexBuffer(GetTotalVertices() * 8), vVertexTextureScaleBuffer, vIndexBuffer(GetTotalTriangles() * 3);
+		std::vector<float> vVertexBuffer(GetTotalVertices() * 8), vVertexTextureScaleBuffer;
+		std::vector<std::uint16_t> vIndexBuffer(GetTotalTriangles() * 3);
 		if (m_bAnyNeedsTextureMatrixScale)
 			vVertexTextureScaleBuffer.resize(GetTotalVertices() * 2);
 
@@ -1383,6 +1384,7 @@ void RageDisplay_D3D11::SetBlendMode( BlendMode mode )
 
 	m_CurrentBlendMode = mode;
 	m_bBlendStateChanged = true;
+	m_BlendDesc.RenderTarget[0].BlendEnable = TRUE;
 
 	switch (mode)
 	{
