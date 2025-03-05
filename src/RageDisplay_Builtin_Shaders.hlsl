@@ -10,7 +10,7 @@ struct VertexData
 	float3 position : SV_Position;
 	float3 normal : NORMAL;
 #if VERTEX_HAS_COLOR
-	float3 color : COLOR;
+	uint color : COLOR; // For compatibility with legacy D3D renderer, DWORD in ARGB order
 #endif
 	float2 texcoord : TEXCOORD;
 #if VERTEX_HAS_TEXTURE_MATRIX_SCALE
@@ -18,16 +18,10 @@ struct VertexData
 #endif
 };
 
-#if VERTEX_HAS_COLOR
-#define VERTEX_COLOR vertexData.color
-#else
-#define VERTEX_COLOR float3(1.f, 1.f, 1.f)
-#endif
-
 struct FragmentData
 {
 	float4 position : SV_Position;
-	float3 color : COLOR;
+	float4 color : COLOR;
 	float4 texcoord : TEXCOORD;
 };
 
@@ -90,13 +84,19 @@ FragmentData VSMain(VertexData vertexData)
 	else
 		lightingAmbient = noLightingMaterialColor;
 
-	// TODO should fragmentData.color be float4 and include alpha?
-	fragmentData.color = VERTEX_COLOR * (lightingAmbient + lightingDiffuse + lightingSpecular).rgb;
+#if VERTEX_HAS_COLOR
+	const float4 vertexColor = (uint4(vertexData.color >> 16u, vertexData.color >> 8u, vertexData.color, vertexData.color >> 24u) & 0xffu) / 255.f;
+#else
+	const float4 vertexColor = float4(1.f, 1.f, 1.f, 1.f);
+#endif
 
-	const float4 texcoordIn = float4(vertexData.texcoord, 0.f, 1.f);
-	const float4 transformedTexcoord = mul(texcoordTransform, texcoordIn);
+	// TODO should we include lighting alpha in the calculations?
+	fragmentData.color = vertexColor * float4((lightingAmbient + lightingDiffuse + lightingSpecular).rgb, 1.f);
+
+	const float4 texcoord = float4(vertexData.texcoord, 0.f, 1.f);
+	const float4 transformedTexcoord = mul(texcoordTransform, texcoord);
 #if VERTEX_HAS_TEXTURE_MATRIX_SCALE
-	fragmentData.texcoord = lerp(texcoordIn, transformedTexcoord, float4(vertexData.textureMatrixScale, 1.f, 1.f));
+	fragmentData.texcoord = lerp(texcoord, transformedTexcoord, float4(vertexData.textureMatrixScale, 1.f, 1.f));
 #else
 	fragmentData.texcoord = transformedTexcoord;
 #endif
@@ -126,8 +126,7 @@ static const SamplerState samplers[MAX_TEXTURES] = { sampler0, sampler1, sampler
 
 float4 PSMain(FragmentData fragmentData) : SV_Target
 {
-	// TODO should fragmentData.color be float4 and include alpha?
-	float4 color = float4(fragmentData.color, 1.f);
+	float4 color = fragmentData.color;
 	const float2 transformedTexcoord = fragmentData.texcoord.xy / fragmentData.texcoord.w;
 
 	[unroll(MAX_TEXTURES)]

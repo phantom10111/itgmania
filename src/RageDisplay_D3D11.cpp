@@ -50,31 +50,31 @@ static const RageDisplay::RagePixelFormatDesc PIXEL_FORMAT_DESC[NUM_RagePixelFor
 	{
 		/* R8G8B8A8 */
 		32,
-		{ 0xFF000000,
-		  0x00FF0000,
+		{ 0x000000FF,
 		  0x0000FF00,
-		  0x000000FF }
+		  0x00FF0000,
+		  0xFF000000 }
 	}, {
 		/* B8G8R8A8 */
 		32,
-		{ 0x0000FF00,
-		  0x00FF0000,
-		  0xFF000000,
-		  0x000000FF }
+		{ 0x00FF0000,
+		  0x0000FF00,
+		  0x000000FF,
+		  0xFF000000 }
 	}, {
 		/* B4G4R4A4 */
 		16,
-		{ 0x00F0,
-		  0x0F00,
-		  0xF000,
-		  0x000F }
+		{ 0x0F00,
+		  0x00F0,
+		  0x000F,
+		  0xF000 }
 	}, {
 		/* B5G5R5A1 */
 		16,
-		{ 0x003E,
-		  0x07C0,
-		  0xF800,
-		  0x0001 }
+		{ 0x7C00,
+		  0x03E0,
+		  0x001F,
+		  0x8000 }
 	}, {
 		/* RGB5 (N/A) */
 		0, { 0,0,0,0 }
@@ -82,23 +82,22 @@ static const RageDisplay::RagePixelFormatDesc PIXEL_FORMAT_DESC[NUM_RagePixelFor
 		/* RGB8 (N/A) */
 		0, { 0,0,0,0 }
 	}, {
-		/* Paletted */
-		8,
-		{ 0,0,0,0 } /* N/A */
+		/* Paletted (N/A) */
+		0, { 0,0,0,0 }
 	}, {
 		/* B8G8R8X8 */
 		32,
-		{ 0x0000FF00,
-		  0x00FF0000,
-		  0xFF000000,
+		{ 0x00FF0000,
+		  0x0000FF00,
+		  0x000000FF,
 		  0x00000000 }
 	}, {
 		/* B5G5R5A1 */
 		16,
-		{ 0x003E,
-		  0x07C0,
-		  0xF800,
-		  0x0001 }
+		{ 0x7C00,
+		  0x03E0,
+		  0x001F,
+		  0x8000 }
 	}, {
 		/* X1R5G5B5 (N/A) */
 		0, { 0,0,0,0 }
@@ -115,7 +114,7 @@ static DXGI_FORMAT DXGI_FORMATS[NUM_RagePixelFormat] =
 	DXGI_FORMAT_B5G5R5A1_UNORM,
 	DXGI_FORMAT_UNKNOWN, // RGB5
 	DXGI_FORMAT_UNKNOWN, // RGB8
-	DXGI_FORMAT_P8,
+	DXGI_FORMAT_UNKNOWN, // PAL
 	DXGI_FORMAT_B8G8R8X8_UNORM,
 	DXGI_FORMAT_B5G5R5A1_UNORM,
 	DXGI_FORMAT_UNKNOWN, // X1R5G5B5
@@ -355,7 +354,7 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 #undef QUOTE
 #undef QUOTE2
 
-	const UINT shaderCompileFlags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS | (bDebugShaders ? (D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION) : D3DCOMPILE_OPTIMIZATION_LEVEL3);
+	const UINT shaderCompileFlags = D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS | (bDebugShaders ? (D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION) : D3DCOMPILE_OPTIMIZATION_LEVEL3);
 
 	Microsoft::WRL::ComPtr<ID3DBlob> pErrorMsgs;
 
@@ -414,7 +413,7 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	hr = m_pDevice->CreateInputLayout(inputElementDescs, 4, pModelTextureMatrixScaleVSBytecode->GetBufferPointer(), pModelTextureMatrixScaleVSBytecode->GetBufferSize(), &m_pModelTextureMatrixScaleInputLayout);
 	ASSERT(SUCCEEDED(hr));
 
-	inputElementDescs[2] = {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RageSpriteVertex, c), D3D11_INPUT_PER_VERTEX_DATA, 0};
+	inputElementDescs[2] = {"COLOR", 0, DXGI_FORMAT_R32_UINT, 0, offsetof(RageSpriteVertex, c), D3D11_INPUT_PER_VERTEX_DATA, 0};
 	inputElementDescs[3] = {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(RageSpriteVertex, t), D3D11_INPUT_PER_VERTEX_DATA, 0};
 	hr = m_pDevice->CreateInputLayout(inputElementDescs, 4, pSpriteVSBytecode->GetBufferPointer(), pSpriteVSBytecode->GetBufferSize(), &m_pSpriteInputLayout);
 	ASSERT(SUCCEEDED(hr));
@@ -709,10 +708,6 @@ void RageDisplay_D3D11::EndFrame()
 
 bool RageDisplay_D3D11::SupportsTextureFormat( RagePixelFormat pixfmt, bool realtime )
 {
-	// TODO does D3D11 even support palleted textures? Even if so, is there a point in supporting them?
-	if( pixfmt == RagePixelFormat_PAL )
-		return false;
-
 	if( DXGI_FORMATS[pixfmt] == DXGI_FORMAT_UNKNOWN )
 		return false;
 
@@ -806,17 +801,12 @@ void RageDisplay_D3D11::UpdateTransforms()
 	m_bConstantBufferVSChanged = true;
 	m_bConstantBufferPSChanged = true;
 
-	RageMatrix projection;
-	RageMatrixMultiply( &projection, GetCentering(), GetProjectionTop() );
-
 	RageMatrix modelView;
-	RageMatrixMultiply( &modelView, GetWorldTop(), GetViewTop() );
-
-	// Transform to column-major
-	RageMatrix temp;
-	RageMatrixTranspose(&temp, &modelView);
+	RageMatrixMultiply(&modelView, GetViewTop(), GetWorldTop());
 
 	// Clear out 4th row and column of the matrix to make the calculations approprate for transforming vectors
+	RageMatrix temp;
+	temp = modelView;
 	temp(3, 0) = 0.f;
 	temp(3, 1) = 0.f;
 	temp(3, 2) = 0.f;
@@ -833,17 +823,14 @@ void RageDisplay_D3D11::UpdateTransforms()
 	DirectX::XMMATRIX normalTransform = DirectX::XMMatrixInverse(nullptr, normalTransformInverse);
 	std::memcpy(&m_ConstantBufferVS.normalTransform, &normalTransform, sizeof(m_ConstantBufferVS.normalTransform));
 
+	RageMatrix projection;
+	RageMatrixMultiply(&projection, GetProjectionTop(), GetCentering());
+
 	RageMatrix modelViewProjection;
-	RageMatrixMultiply( &modelViewProjection, &modelView, &projection );
+	RageMatrixMultiply(&modelViewProjection, &projection, &modelView);
 
-	// Transform to column-major
-	RageMatrixTranspose(&temp, &modelView);
-	std::memcpy(&m_ConstantBufferVS.vertexTransform, &temp, sizeof(m_ConstantBufferVS.vertexTransform));
-
-	// Transform to column-major
-	RageMatrixTranspose(&temp, GetTextureTop());
-	// Todo sphere environment mapping
-	std::memcpy(&m_ConstantBufferVS.texcoordTransform, &temp, sizeof(m_ConstantBufferVS.texcoordTransform));
+	std::memcpy(&m_ConstantBufferVS.vertexTransform, &modelViewProjection, sizeof(m_ConstantBufferVS.vertexTransform));
+	std::memcpy(&m_ConstantBufferVS.texcoordTransform, GetTextureTop(), sizeof(m_ConstantBufferVS.texcoordTransform));
 }
 
 void RageDisplay_D3D11::BindRenderingState()
@@ -1683,6 +1670,7 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	// if bGenerateMipMaps is true, assume this is a normal texture that won't be updated often and just give it D3D11_USAGE_DEFAULT and no CPU access
 	// but if bGenerateMipMaps is false it's probably something special (like a video texture for example) and give it D3D11_USAGE_DYNAMIC and CPU write access
 	// TODO - is this sensible? can we have a better way to determine appropriate usage for a texture? the choice made here is important, it will interact with RageTextureLock for example
+	// XXX - this is definitely wrong, we need a better way to choose, but it can stay that way for a PoC
 	textureDesc.Usage = bGenerateMipMaps ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
 	textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (bGenerateMipMaps ? D3D11_BIND_RENDER_TARGET: 0);
 	textureDesc.CPUAccessFlags = bGenerateMipMaps ? 0 : D3D11_CPU_ACCESS_WRITE;
