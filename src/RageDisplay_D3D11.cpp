@@ -1584,10 +1584,15 @@ void RageDisplay_D3D11::SetMaterial(
 	}
 	else
 	{
-		RageColor c = diffuse;
-		c.r += emissive.r + ambient.r;
-		c.g += emissive.g + ambient.g;
-		c.b += emissive.b + ambient.b;
+		RageColor c;
+		// Seems that a lot of the times the sum will exceed 1 so we should clamp to get more correct colors
+		// In fact D3D renderer will always clamp the values
+		// But OpenGL will not clamp but then the values seem to be clamped somewhere in the runtime anyway
+		// TODO - figure out the right way to do this
+		c.r = clamp(diffuse.r + emissive.r + ambient.r, 0.f, 1.f);
+		c.g = clamp(diffuse.g + emissive.g + ambient.g, 0.f, 1.f);
+		c.b = clamp(diffuse.b + emissive.b + ambient.b, 0.f, 1.f);
+		c.a = clamp(diffuse.a, 0.f, 1.f);
 		std::memcpy( &m_ConstantBufferVS.noLightingMaterialColor, &c, sizeof(m_ConstantBufferVS.noLightingMaterialColor) );
 	}
 }
