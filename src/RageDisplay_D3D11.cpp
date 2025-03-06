@@ -1076,22 +1076,6 @@ public:
 		constexpr const UINT offsets[2] = {0, 0};
 		m_pDeviceContext->IASetVertexBuffers(0, m_bAnyNeedsTextureMatrixScale ? 2 : 1, vertexBuffers, strides, offsets);
 
-		// TODO handle the texture matrix scale somehow
-#if 0
-		if( meshInfo.m_bNeedsTextureMatrixScale )
-		{
-			// Kill the texture translation.
-			// XXX: Change me to scale the translation by the TextureTranslationScale of the first vertex.
-			RageMatrix m;
-			g_pd3dDevice->GetTransform( D3DTS_TEXTURE0, (D3DMATRIX*)&m );
-
-			m.m[2][0] = 0;
-			m.m[2][1] = 0;
-
-			g_pd3dDevice->SetTransform( D3DTS_TEXTURE0, (D3DMATRIX*)&m );
-		}
-#endif
-
 		m_pDeviceContext->DrawIndexed(meshInfo.iTriangleCount * 3, meshInfo.iTriangleStart * 3, 0);
 	}
 
