@@ -2,8 +2,8 @@
 #define TEXTURE_MASK ((1u << TEXTURE_SHIFT) - 1u)
 
 #define TEXTURE_MODE_MODULATE 0u
-#define TEXTURE_MODE_ADD 1u
-#define TEXTURE_MODE_GLOW 2u
+#define TEXTURE_MODE_GLOW 1u
+#define TEXTURE_MODE_ADD 2u
 
 struct VertexData
 {
@@ -139,11 +139,11 @@ float4 PSMain(FragmentData fragmentData) : SV_Target
 			case TEXTURE_MODE_MODULATE:
 				color *= textureColor;
 				break;
-			case TEXTURE_MODE_ADD:
-				color.rgb += textureColor.rgb;
+			case TEXTURE_MODE_GLOW:
 				color.a *= textureColor.a;
 				break;
-			case TEXTURE_MODE_GLOW:
+			case TEXTURE_MODE_ADD:
+				color.rgb += textureColor.rgb;
 				color.a *= textureColor.a;
 				break;
 		}
