@@ -690,6 +690,7 @@ bool RageDisplay_D3D11::BeginFrame()
 	m_pDeviceContext->PSSetShader(m_pBuiltinPixelShader.Get(), nullptr, 0);
 
 	m_pDeviceContext->OMSetRenderTargets(1, m_pRenderTargetView.GetAddressOf(), m_pDepthStencilView.Get());
+	m_pBoundDepthStencilView = m_pDepthStencilView;
 
 	return RageDisplay::BeginFrame();
 }
@@ -1540,7 +1541,8 @@ void RageDisplay_D3D11::SetZTestMode( ZTestMode mode )
 
 void RageDisplay_D3D11::ClearZBuffer()
 {
-	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.f, 0);
+	if (m_pBoundDepthStencilView)
+		m_pDeviceContext->ClearDepthStencilView(m_pBoundDepthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.f, 0);
 }
 
 void RageDisplay_D3D11::SetTextureWrapping( TextureUnit tu, bool b )
@@ -1654,6 +1656,7 @@ void RageDisplay_D3D11::SetCullMode( CullMode mode )
 	{
 		m_bRasterizerStateChanged = true;
 		m_RasterizerDesc.CullMode = cullMode;
+		m_RasterizerDesc.FrontCounterClockwise = TRUE; // Use OpenGL convention for culling
 	}
 }
 
@@ -1849,6 +1852,7 @@ void RageDisplay_D3D11::SetRenderTarget(std::uintptr_t iHandle, bool bPreserveTe
 		m_pDeviceContext->RSSetViewports(1, &m_Viewport);
 
 		m_pDeviceContext->OMSetRenderTargets(1, m_pRenderTargetView.GetAddressOf(), m_pDepthStencilView.Get());
+		m_pBoundDepthStencilView = m_pDepthStencilView;
 	}
 	else
 	{
@@ -1869,7 +1873,8 @@ void RageDisplay_D3D11::SetRenderTarget(std::uintptr_t iHandle, bool bPreserveTe
 		m_Viewport.Height = pTex->m_iHeight;
 		m_pDeviceContext->RSSetViewports(1, &m_Viewport);
 
-		m_pDeviceContext->OMSetRenderTargets(1, pTex->m_pRTV.GetAddressOf(), pTex->m_pDSV ? pTex->m_pDSV.Get() : m_pDepthStencilView.Get());
+		m_pDeviceContext->OMSetRenderTargets(1, pTex->m_pRTV.GetAddressOf(), pTex->m_pDSV.Get());
+		m_pBoundDepthStencilView = pTex->m_pDSV;
 	}
 }
 

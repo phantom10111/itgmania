@@ -119,6 +119,7 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pRenderTarget;
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
 	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;
+	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_pBoundDepthStencilView;
 	// TODO delegate this to a separate pipeline object
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pModelVertexShader;
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_pModelTextureMatrixScaleVertexShader;
