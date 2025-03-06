@@ -1363,6 +1363,7 @@ void RageDisplay_D3D11::SetTextureFiltering( TextureUnit tu, bool b )
 	if( m_SamplerStates[idx].Filter != filter )
 	{
 		m_bTexturesChanged = true;
+		m_bSamplerStateChanged[idx] = true;
 		m_SamplerStates[idx].Filter = filter;
 	}
 }
@@ -1555,6 +1556,7 @@ void RageDisplay_D3D11::SetTextureWrapping( TextureUnit tu, bool b )
 	if( m_SamplerStates[idx].AddressU != mode )
 	{
 		m_bTexturesChanged = true;
+		m_bSamplerStateChanged[idx] = true;
 		m_SamplerStates[idx].AddressU = mode;
 		m_SamplerStates[idx].AddressV = mode;
 	}
