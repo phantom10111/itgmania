@@ -85,6 +85,7 @@ protected:
 	RString TryVideoMode( const VideoModeParams &p, bool &bNewDeviceOut );
 	RageSurface* CreateScreenshot();
 	RageMatrix GetOrthoMatrix( float l, float r, float b, float t, float zn, float zf );
+	RageMatrix GetFrustumMatrix( float l, float r, float b, float t, float zn, float zf );
 
 	void SendCurrentMatrices();
 };

@@ -1964,6 +1964,21 @@ RageMatrix RageDisplay_D3D11::GetOrthoMatrix( float l, float r, float b, float t
 	return m;
 }
 
+RageMatrix RageDisplay_D3D11::GetFrustumMatrix( float l, float r, float b, float t, float zn, float zf )
+{
+	RageMatrix m = RageDisplay::GetFrustumMatrix( l, r, b, t, zn, zf );
+
+	// Convert from OpenGL's [-1,+1] Z values to D3D's [0,+1].
+	RageMatrix tmp;
+	RageMatrixScaling( &tmp, 1, 1, 0.5f );
+	RageMatrixMultiply( &m, &tmp, &m );
+
+	RageMatrixTranslation( &tmp, 0, 0, 0.5f );
+	RageMatrixMultiply( &m, &tmp, &m );
+
+	return m;
+}
+
 void RageDisplay_D3D11::SetSphereEnvironmentMapping( TextureUnit tu, bool b )
 {
 	// TODO
