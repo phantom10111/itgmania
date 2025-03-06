@@ -57,13 +57,13 @@ FragmentData VSMain(VertexData vertexData)
 	FragmentData fragmentData;
 	fragmentData.position = mul(vertexTransform, float4(vertexData.position, 1.f));
 
-	float4 lightingAmbient;
-	float4 lightingDiffuse = float4(0.f, 0.f, 0.f, 0.f);
-	float4 lightingSpecular = float4(0.f, 0.f, 0.f, 0.f);
-
+	float4 finalLighting;
 	if (LIGHTING_ENABLED)
 	{
-		lightingAmbient = float4(0.f, 0.f, 0.f, 0.f);
+		float3 lightingAmbient = float3(0.f, 0.f, 0.f);
+		float3 lightingDiffuse = float3(0.f, 0.f, 0.f);
+		float3 lightingSpecular = float3(0.f, 0.f, 0.f);
+
 		const float3 normal = normalize(mul(normalTransform, vertexData.normal));
 
 		for (uint i = 0u; i < NUM_LIGHTS; ++i)
@@ -72,26 +72,27 @@ FragmentData VSMain(VertexData vertexData)
 			// Since we are in eye coordinaties, (0, 0, 1) is the view direction
 			const float3 halfDir = normalize(dir + float3(0.f, 0.f, 1.f));
 
-			lightingAmbient += lights[i].ambient;
-			lightingDiffuse += lights[i].diffuse * saturate(dot(normal, dir));
-			lightingSpecular += lights[i].specular * pow(saturate(dot(normal, halfDir)), materialShininess);
+			lightingAmbient += lights[i].ambient.rgb;
+			lightingDiffuse += lights[i].diffuse.rgb * saturate(dot(normal, dir));
+			lightingSpecular += lights[i].specular.rgb * pow(saturate(dot(normal, halfDir)), materialShininess);
 		}
 
-		lightingAmbient = (lightingAmbient * materialAmbient) + materialEmission;
-		lightingDiffuse *= materialDiffuse;
-		lightingSpecular *= materialSpecular;
+		lightingAmbient *= materialAmbient.rgb;
+		lightingDiffuse *= materialDiffuse.rgb;
+		lightingSpecular *= materialSpecular.rgb;
+
+		finalLighting = float4(lightingAmbient + lightingDiffuse + lightingSpecular + materialEmission.rgb, materialDiffuse.a);
 	}
 	else
-		lightingAmbient = noLightingMaterialColor;
+		finalLighting = noLightingMaterialColor;
 
 #if VERTEX_HAS_COLOR
 	const float4 vertexColor = (uint4(vertexData.color >> 16u, vertexData.color >> 8u, vertexData.color, vertexData.color >> 24u) & 0xffu) / 255.f;
 #else
-	const float4 vertexColor = float4(1.f, 1.f, 1.f, 1.f);
+	static const float4 vertexColor = float4(1.f, 1.f, 1.f, 1.f);
 #endif
 
-	// TODO should we include lighting alpha in the calculations?
-	fragmentData.color = vertexColor * float4((lightingAmbient + lightingDiffuse + lightingSpecular).rgb, 1.f);
+	fragmentData.color = vertexColor * finalLighting;
 
 	const float4 texcoord = float4(vertexData.texcoord, 0.f, 1.f);
 	const float4 transformedTexcoord = mul(texcoordTransform, texcoord);
