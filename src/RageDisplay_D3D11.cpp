@@ -701,8 +701,7 @@ void RageDisplay_D3D11::EndFrame()
 {
 	FrameLimitBeforeVsync( GetActualVideoModeParams().rate );
 	// TODO how to handle DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING?
-	// What about vsync and no vsync? should we pass different sync interval here?
-	m_pSwapchain->Present(1, 0);
+	m_pSwapchain->Present(GetActualVideoModeParams().vsync, 0);
 	FrameLimitAfterVsync();
 
 	RageDisplay::EndFrame();
