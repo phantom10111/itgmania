@@ -40,11 +40,11 @@ cbuffer ConstantsVS : register(b0)
 	float4x4 texcoordTransform;
 	uint numLights;
 	float materialShininess;
-	float4 noLightingMaterialColor;
 	float4 materialAmbient;
 	float4 materialDiffuse;
 	float4 materialSpecular;
 	float4 materialEmission;
+	float4 defaultVertexColor;
 	LightData lights[MAX_LIGHTS];
 };
 
@@ -52,7 +52,7 @@ cbuffer ConstantsVS : register(b0)
 #define LIGHTING_ENABLED (numLights > 0u)
 #define NUM_LIGHTS (numLights - 1u)
 
-FragmentData VSMain(VertexData vertexData)
+FragmentData VSMain(const VertexData vertexData)
 {
 	FragmentData fragmentData;
 	fragmentData.position = mul(vertexTransform, float4(vertexData.position, 1.f));
@@ -81,15 +81,15 @@ FragmentData VSMain(VertexData vertexData)
 		lightingDiffuse *= materialDiffuse.rgb;
 		lightingSpecular *= materialSpecular.rgb;
 
-		finalLighting = float4(lightingAmbient + lightingDiffuse + lightingSpecular + materialEmission.rgb, materialDiffuse.a);
+		finalLighting = saturate(float4(lightingAmbient + lightingDiffuse + lightingSpecular + materialEmission.rgb, materialDiffuse.a));
 	}
 	else
-		finalLighting = noLightingMaterialColor;
+		finalLighting = float4(1.f, 1.f, 1.f, 1.f);
 
 #if VERTEX_HAS_COLOR
 	const float4 vertexColor = (uint4(vertexData.color >> 16u, vertexData.color >> 8u, vertexData.color, vertexData.color >> 24u) & 0xffu) / 255.f;
 #else
-	static const float4 vertexColor = float4(1.f, 1.f, 1.f, 1.f);
+	static const float4 vertexColor = defaultVertexColor;
 #endif
 
 	fragmentData.color = vertexColor * finalLighting;
@@ -125,7 +125,7 @@ SamplerState sampler3 : register(s3);
 static const Texture2D textures[MAX_TEXTURES] = { texture0, texture1, texture2, texture3 };
 static const SamplerState samplers[MAX_TEXTURES] = { sampler0, sampler1, sampler2, sampler3 };
 
-float4 PSMain(FragmentData fragmentData) : SV_Target
+float4 PSMain(const FragmentData fragmentData) : SV_Target
 {
 	float4 color = fragmentData.color;
 	const float2 transformedTexcoord = fragmentData.texcoord.xy / fragmentData.texcoord.w;

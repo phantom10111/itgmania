@@ -151,7 +151,7 @@ RageDisplay_D3D11::RageDisplay_D3D11()
 
 	m_ConstantBufferVS.numLights = 0;
 	m_ConstantBufferVS.materialShininess = 0.f;
-	m_ConstantBufferVS.noLightingMaterialColor = DirectX::XMFLOAT4A{1.f, 1.f, 1.f, 1.f};
+	m_ConstantBufferVS.defaultVertexColor = DirectX::XMFLOAT4A{1.f, 1.f, 1.f, 1.f};
 	m_ConstantBufferVS.materialAmbient = DirectX::XMFLOAT4A{0.f, 0.f, 0.f, 1.f};
 	m_ConstantBufferVS.materialDiffuse = DirectX::XMFLOAT4A{1.f, 1.f, 1.f, 1.f};
 	m_ConstantBufferVS.materialSpecular = DirectX::XMFLOAT4A{0.f, 0.f, 0.f, 1.f};
@@ -1579,7 +1579,7 @@ void RageDisplay_D3D11::SetMaterial(
 		c.g = clamp(diffuse.g + emissive.g + ambient.g, 0.f, 1.f);
 		c.b = clamp(diffuse.b + emissive.b + ambient.b, 0.f, 1.f);
 		c.a = clamp(diffuse.a, 0.f, 1.f);
-		std::memcpy( &m_ConstantBufferVS.noLightingMaterialColor, &c, sizeof(m_ConstantBufferVS.noLightingMaterialColor) );
+		std::memcpy( &m_ConstantBufferVS.defaultVertexColor, &c, sizeof(m_ConstantBufferVS.defaultVertexColor) );
 	}
 }
 

@@ -172,11 +172,11 @@ protected:
 		DirectX::XMFLOAT4X4A texcoordTransform;
 		std::uint32_t numLights;
 		float materialShininess;
-		DirectX::XMFLOAT4A noLightingMaterialColor;
 		DirectX::XMFLOAT4A materialAmbient;
 		DirectX::XMFLOAT4A materialDiffuse;
 		DirectX::XMFLOAT4A materialSpecular;
 		DirectX::XMFLOAT4A materialEmission;
+		DirectX::XMFLOAT4A defaultVertexColor;
 		LightData lights[D3D11_MAX_LIGHTS];
 	} m_ConstantBufferVS;
 
