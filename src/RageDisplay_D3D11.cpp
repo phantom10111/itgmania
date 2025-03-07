@@ -825,7 +825,7 @@ void RageDisplay_D3D11::UpdateTransforms()
 	std::memcpy(&m_ConstantBufferVS.normalTransform, &normalTransform, sizeof(m_ConstantBufferVS.normalTransform));
 
 	RageMatrix projection;
-	RageMatrixMultiply(&projection, GetProjectionTop(), GetCentering());
+	RageMatrixMultiply(&projection, GetCentering(), GetProjectionTop());
 
 	RageMatrix modelViewProjection;
 	RageMatrixMultiply(&modelViewProjection, &projection, &modelView);
