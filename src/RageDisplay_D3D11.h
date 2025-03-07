@@ -166,7 +166,8 @@ protected:
 	bool m_bConstantBufferVSChanged = true; // Changed because no buffer is bound by default
 	struct alignas(16) ConstantsVS
 	{
-		DirectX::XMFLOAT4X4A vertexTransform;
+		DirectX::XMFLOAT4X4A vertexProjectionTransform;
+		DirectX::XMFLOAT4X4A vertexEyeTransform;
 		// 4th column of normalTransform is not used but it's here to get correct alignment
 		DirectX::XMFLOAT3X4A normalTransform;
 		DirectX::XMFLOAT4X4A texcoordTransform;
@@ -186,6 +187,7 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11SamplerState> m_pSamplerStates[D3D11_MAX_TEXTURES];
 	std::uintptr_t m_iTextures[D3D11_MAX_TEXTURES];
 	TextureMode m_TextureModes[D3D11_MAX_TEXTURES];
+	bool m_bSphereMapping[D3D11_MAX_TEXTURES];
 
 	bool m_bConstantBufferPSChanged = true; // Changed because no buffer is bound by default
 	struct alignas(16) ConstantsPS

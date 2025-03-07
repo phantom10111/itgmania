@@ -1,5 +1,6 @@
-#define TEXTURE_SHIFT 2u
-#define TEXTURE_MASK ((1u << TEXTURE_SHIFT) - 1u)
+#define TEXTURE_SHIFT 3u
+#define TEXTURE_MODE_MASK 3u
+#define TEXTURE_SPHERE_MAPPING_SHIFT 2u
 
 #define TEXTURE_MODE_MODULATE 0u
 #define TEXTURE_MODE_GLOW 1u
@@ -23,6 +24,7 @@ struct FragmentData
 	float4 position : SV_Position;
 	float4 color : COLOR;
 	float4 texcoord : TEXCOORD;
+	float4 sphereMapTexcoord : TEXCOORD1;
 };
 
 struct LightData
@@ -35,7 +37,8 @@ struct LightData
 
 cbuffer ConstantsVS : register(b0)
 {
-	float4x4 vertexTransform;
+	float4x4 vertexProjectionTransform;
+	float4x4 vertexEyeTransform;
 	float3x3 normalTransform;
 	float4x4 texcoordTransform;
 	uint numLights;
@@ -52,10 +55,23 @@ cbuffer ConstantsVS : register(b0)
 #define LIGHTING_ENABLED (numLights > 0u)
 #define NUM_LIGHTS (numLights - 1u)
 
+float4 transformTexcoord(const VertexData vertexData, const float2 texcoord)
+{
+	const float4 texcoord4 = float4(texcoord, 0.f, 1.f);
+	const float4 transformedTexcoord = mul(texcoordTransform, texcoord4);
+#if VERTEX_HAS_TEXTURE_MATRIX_SCALE
+	return lerp(texcoord4, transformedTexcoord, float4(vertexData.textureMatrixScale, 1.f, 1.f));
+#else
+	return transformedTexcoord;
+#endif
+}
+
 FragmentData VSMain(const VertexData vertexData)
 {
 	FragmentData fragmentData;
-	fragmentData.position = mul(vertexTransform, float4(vertexData.position, 1.f));
+	fragmentData.position = mul(vertexProjectionTransform, float4(vertexData.position, 1.f));
+
+	const float3 normal = normalize(mul(normalTransform, vertexData.normal));
 
 	float4 finalLighting;
 	if (LIGHTING_ENABLED)
@@ -63,8 +79,6 @@ FragmentData VSMain(const VertexData vertexData)
 		float3 lightingAmbient = float3(0.f, 0.f, 0.f);
 		float3 lightingDiffuse = float3(0.f, 0.f, 0.f);
 		float3 lightingSpecular = float3(0.f, 0.f, 0.f);
-
-		const float3 normal = normalize(mul(normalTransform, vertexData.normal));
 
 		for (uint i = 0u; i < NUM_LIGHTS; ++i)
 		{
@@ -93,14 +107,12 @@ FragmentData VSMain(const VertexData vertexData)
 #endif
 
 	fragmentData.color = vertexColor * finalLighting;
+	fragmentData.texcoord = transformTexcoord(vertexData, vertexData.texcoord);
 
-	const float4 texcoord = float4(vertexData.texcoord, 0.f, 1.f);
-	const float4 transformedTexcoord = mul(texcoordTransform, texcoord);
-#if VERTEX_HAS_TEXTURE_MATRIX_SCALE
-	fragmentData.texcoord = lerp(texcoord, transformedTexcoord, float4(vertexData.textureMatrixScale, 1.f, 1.f));
-#else
-	fragmentData.texcoord = transformedTexcoord;
-#endif
+	const float3 vertexEyeDir = normalize(mul(vertexEyeTransform, float4(vertexData.position, 1.f)).xyz);
+	const float3 vertexEyeReflection = vertexEyeDir - 2.f * dot(vertexEyeDir, normal) * normal;
+	const float m = 2.f * length(vertexEyeReflection + float3(0.f, 0.f, 1.f));
+	fragmentData.sphereMapTexcoord = transformTexcoord(vertexData, float2(vertexEyeReflection.x / m + 0.5f, vertexEyeReflection.y / m + 0.5f));
 
 	return fragmentData;
 }
@@ -109,7 +121,7 @@ cbuffer ConstantsPS : register(b0)
 {
 	uint numTextures;
 	uint textureModes;
-	bool bAlphaTestEnabled;
+	bool alphaTestEnabled;
 };
 
 Texture2D texture0 : register(t0);
@@ -128,13 +140,16 @@ static const SamplerState samplers[MAX_TEXTURES] = { sampler0, sampler1, sampler
 float4 PSMain(const FragmentData fragmentData) : SV_Target
 {
 	float4 color = fragmentData.color;
-	const float2 transformedTexcoord = fragmentData.texcoord.xy / fragmentData.texcoord.w;
+	const float2 texcoord = fragmentData.texcoord.xy / fragmentData.texcoord.w;
+	const float2 sphereMapTexcoord = fragmentData.sphereMapTexcoord.xy / fragmentData.sphereMapTexcoord.w;
 
 	[unroll(MAX_TEXTURES)]
 	for (uint i = 0u; i < numTextures; ++i)
 	{
-		const uint textureMode = (textureModes >> (i * TEXTURE_SHIFT)) & TEXTURE_MASK;
-		const float4 textureColor = textures[i].Sample(samplers[i], transformedTexcoord);
+		const uint textureMode = (textureModes >> (i * TEXTURE_SHIFT)) & TEXTURE_MODE_MASK;
+		const bool sphereMapping = (textureModes >> (i * TEXTURE_SHIFT + TEXTURE_SPHERE_MAPPING_SHIFT)) & 1u;
+		const float4 textureColor = textures[i].Sample(samplers[i], sphereMapping ? sphereMapTexcoord : texcoord);
+
 		switch (textureMode)
 		{
 			case TEXTURE_MODE_MODULATE:
@@ -150,7 +165,7 @@ float4 PSMain(const FragmentData fragmentData) : SV_Target
 		}
 	}
 
-	if (bAlphaTestEnabled && color.a <= 1.f / 256.f)
+	if (alphaTestEnabled && color.a <= 1.f / 256.f)
 		discard;
 
 	return color;

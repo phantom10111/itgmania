@@ -147,6 +147,7 @@ RageDisplay_D3D11::RageDisplay_D3D11()
 
 		m_iTextures[i] = 0;
 		m_TextureModes[i] = TextureMode_Modulate;
+		m_bSphereMapping[i] = false;
 	}
 
 	m_ConstantBufferVS.numLights = 0;
@@ -805,6 +806,8 @@ void RageDisplay_D3D11::UpdateTransforms()
 	RageMatrix modelView;
 	RageMatrixMultiply(&modelView, GetViewTop(), GetWorldTop());
 
+	std::memcpy(&m_ConstantBufferVS.vertexEyeTransform, &modelView, sizeof(m_ConstantBufferVS.vertexEyeTransform));
+
 	// Clear out 4th row and column of the matrix to make the calculations approprate for transforming vectors
 	RageMatrix temp;
 	temp = modelView;
@@ -830,7 +833,7 @@ void RageDisplay_D3D11::UpdateTransforms()
 	RageMatrix modelViewProjection;
 	RageMatrixMultiply(&modelViewProjection, &projection, &modelView);
 
-	std::memcpy(&m_ConstantBufferVS.vertexTransform, &modelViewProjection, sizeof(m_ConstantBufferVS.vertexTransform));
+	std::memcpy(&m_ConstantBufferVS.vertexProjectionTransform, &modelViewProjection, sizeof(m_ConstantBufferVS.vertexProjectionTransform));
 	std::memcpy(&m_ConstantBufferVS.texcoordTransform, GetTextureTop(), sizeof(m_ConstantBufferVS.texcoordTransform));
 }
 
@@ -929,7 +932,8 @@ void RageDisplay_D3D11::BindRenderingState()
 					ASSERT(SUCCEEDED(hr));
 				}
 
-				m_ConstantBufferPS.textureModes |= m_TextureModes[i] << (m_ConstantBufferPS.numTextures * 2);
+				m_ConstantBufferPS.textureModes |= m_TextureModes[i] << (m_ConstantBufferPS.numTextures * 3);
+				m_ConstantBufferPS.textureModes |= m_bSphereMapping[i] << (m_ConstantBufferPS.numTextures * 3 + 2);
 				pSamplerStates[m_ConstantBufferPS.numTextures] = m_pSamplerStates[i].Get();
 
 				RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(m_iTextures[i]);
@@ -1967,8 +1971,15 @@ RageMatrix RageDisplay_D3D11::GetFrustumMatrix( float l, float r, float b, float
 
 void RageDisplay_D3D11::SetSphereEnvironmentMapping( TextureUnit tu, bool b )
 {
-	// TODO
-	// g_bSphereMapping[tu] = b;
+	unsigned int idx = static_cast<unsigned int>(tu);
+	if( idx >= D3D11_MAX_TEXTURES )	// not supported
+		return;
+
+	if( m_bSphereMapping[idx] != b )
+	{
+		m_bTexturesChanged = true;
+		m_bSphereMapping[idx] = b;
+	}
 }
 
 void RageDisplay_D3D11::SetCelShaded( int stage )
