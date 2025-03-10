@@ -44,7 +44,7 @@ static constexpr const char BUILTIN_SHADER[] = {
 
 // TODO: Instead of defining this here, enumerate the possible formats and select whatever one we want to use. This format should
 // be fine for the uses of this application though.
-const DXGI_FORMAT g_DefaultAdapterFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+const DXGI_FORMAT g_DefaultAdapterFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 
 static const RageDisplay::RagePixelFormatDesc PIXEL_FORMAT_DESC[NUM_RagePixelFormat] = {
 	{
