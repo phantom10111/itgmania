@@ -37,7 +37,8 @@ public:
 	std::uintptr_t CreateTexture(
 		RagePixelFormat pixfmt,
 		RageSurface* img,
-		bool bGenerateMipMaps );
+		bool bGenerateMipMaps,
+		ResourceUsage usage );
 	void UpdateTexture(
 		std::uintptr_t iTexHandle,
 		RageSurface* img,

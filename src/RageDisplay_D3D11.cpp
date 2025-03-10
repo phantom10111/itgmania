@@ -1666,8 +1666,12 @@ void RageDisplay_D3D11::SetCullMode( CullMode mode )
 std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* img,
-	bool bGenerateMipMaps )
+	bool bGenerateMipMaps,
+	ResourceUsage usage )
 {
+	// Since we are using D3D11_USAGE_DYNAMIC for ResourceUsage::UPDATED_OFTEN D3D11 won't support mipmaps in that case, but that's probably fine
+	ASSERT(!bGenerateMipMaps || usage != ResourceUsage::UPDATED_OFTEN);
+
 	D3D11_TEXTURE2D_DESC textureDesc;
 	textureDesc.Width = img->w;
 	textureDesc.Height = img->h;
@@ -1675,13 +1679,9 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	textureDesc.ArraySize = 1;
 	textureDesc.Format = DXGI_FORMATS[pixfmt];
 	textureDesc.SampleDesc = { 1, 0 };
-	// if bGenerateMipMaps is true, assume this is a normal texture that won't be updated often and just give it D3D11_USAGE_DEFAULT and no CPU access
-	// but if bGenerateMipMaps is false it's probably something special (like a video texture for example) and give it D3D11_USAGE_DYNAMIC and CPU write access
-	// TODO - is this sensible? can we have a better way to determine appropriate usage for a texture? the choice made here is important, it will interact with RageTextureLock for example
-	// XXX - this is definitely wrong, we need a better way to choose, but it can stay that way for a PoC
-	textureDesc.Usage = bGenerateMipMaps ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
+	textureDesc.Usage = usage == ResourceUsage::UPDATED_RARELY ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
 	textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (bGenerateMipMaps ? D3D11_BIND_RENDER_TARGET: 0);
-	textureDesc.CPUAccessFlags = bGenerateMipMaps ? 0 : D3D11_CPU_ACCESS_WRITE;
+	textureDesc.CPUAccessFlags = usage == ResourceUsage::UPDATED_RARELY ? 0 : D3D11_CPU_ACCESS_WRITE;
 	textureDesc.MiscFlags = bGenerateMipMaps ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
 
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
@@ -1692,7 +1692,7 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	// TODO this whole block is pretty much identical to RageDisplay_D3D11::UpdateTexture() (except for offset)
 	// TODO does it matter if we update the texture here or just give initial data to CreateTexture2D()?
 	const RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pixfmt];
-	if (bGenerateMipMaps)
+	if (usage == ResourceUsage::UPDATED_RARELY)
 	{
 		RageSurface* pSurface;
 		if(!RageSurfaceUtils::ConvertSurface(img, pSurface, textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3]))

@@ -167,7 +167,7 @@ private:
 			m_SurfaceFormat.Mask[2],
 			m_SurfaceFormat.Mask[3], nullptr, 1 );
 
-		m_uTexHandle = DISPLAY->CreateTexture( m_PixFmt, pSurface, false );
+		m_uTexHandle = DISPLAY->CreateTexture( m_PixFmt, pSurface, false, RageDisplay::ResourceUsage::UPDATED_OFTEN );
 		delete pSurface;
 	}
 
@@ -300,7 +300,7 @@ void MovieTexture_Generic::CreateTexture()
 		return;
 	}
 
-	m_uTexHandle = DISPLAY->CreateTexture( pixfmt, m_pSurface, false );
+	m_uTexHandle = DISPLAY->CreateTexture( pixfmt, m_pSurface, false, RageDisplay::ResourceUsage::UPDATED_OFTEN );
 }
 
 /* Handle decoding for a frame.  Return true if a frame was decoded, false if not

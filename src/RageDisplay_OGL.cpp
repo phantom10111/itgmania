@@ -2203,7 +2203,8 @@ void SetPixelMapForSurface( int glImageFormat, int glTexFormat, const RageSurfac
 std::uintptr_t RageDisplay_Legacy::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* pImg,
-	bool bGenerateMipMaps )
+	bool bGenerateMipMaps,
+	ResourceUsage usage )
 {
 	ASSERT( pixfmt < NUM_RagePixelFormat );
 

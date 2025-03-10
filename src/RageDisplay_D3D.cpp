@@ -1379,7 +1379,8 @@ void RageDisplay_D3D::DeleteTexture( std::uintptr_t iTexHandle )
 std::uintptr_t RageDisplay_D3D::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* img,
-	bool bGenerateMipMaps )
+	bool bGenerateMipMaps,
+	ResourceUsage usage )
 {
 	HRESULT hr;
 	IDirect3DTexture9* pTex;

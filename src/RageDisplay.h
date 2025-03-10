@@ -218,6 +218,13 @@ class RageDisplay
 
 public:
 
+	// TODO this is appropriate for D3D11 for now, but should probably be extended for other APIs
+	enum class ResourceUsage
+	{
+		UPDATED_RARELY,
+		UPDATED_OFTEN,
+	};
+
 	struct RagePixelFormatDesc {
 		int bpp;
 		unsigned int masks[4];
@@ -264,7 +271,8 @@ public:
 	virtual std::uintptr_t CreateTexture(
 		RagePixelFormat pixfmt,		// format of img and of texture in video mem
 		RageSurface* img,		// must be in pixfmt
-		bool bGenerateMipMaps
+		bool bGenerateMipMaps,
+		ResourceUsage usage
 		) = 0;
 	virtual void UpdateTexture(
 		std::uintptr_t iTexHandle,

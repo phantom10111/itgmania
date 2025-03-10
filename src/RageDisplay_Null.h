@@ -24,7 +24,8 @@ public:
 	std::uintptr_t CreateTexture(
 		RagePixelFormat,
 		RageSurface* /* img */,
-		bool /* bGenerateMipMaps */ ) { return 1; }
+		bool /* bGenerateMipMaps */,
+		ResourceUsage ) { return 1; }
 	void UpdateTexture(
 		std::uintptr_t /* iTexHandle */,
 		RageSurface* /* img */,

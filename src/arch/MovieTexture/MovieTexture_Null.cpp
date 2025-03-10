@@ -56,7 +56,7 @@ MovieTexture_Null::MovieTexture_Null(RageTextureID ID) : RageMovieTexture(ID)
 		pfd->masks[0], pfd->masks[1], pfd->masks[2], pfd->masks[3] );
 	memset( img->pixels, 0, img->pitch*img->h );
 
-	texHandle = DISPLAY->CreateTexture( pixfmt, img, false );
+	texHandle = DISPLAY->CreateTexture( pixfmt, img, false, RageDisplay::ResourceUsage::UPDATED_RARELY );
 
 	delete img;
 }

@@ -270,7 +270,7 @@ void RageBitmapTexture::Create()
 	RageSurfaceUtils::ConvertSurface( pImg, m_iTextureWidth, m_iTextureHeight,
 		pImg->fmt.BitsPerPixel, pImg->fmt.Mask[0], pImg->fmt.Mask[1], pImg->fmt.Mask[2], pImg->fmt.Mask[3] );
 
-	m_uTexHandle = DISPLAY->CreateTexture( pixfmt, pImg, actualID.bMipMaps );
+	m_uTexHandle = DISPLAY->CreateTexture( pixfmt, pImg, actualID.bMipMaps, RageDisplay::ResourceUsage::UPDATED_RARELY );
 
 	CreateFrameRects();
 
