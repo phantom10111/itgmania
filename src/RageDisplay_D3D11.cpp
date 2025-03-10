@@ -245,6 +245,9 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		}
 	}
 
+	Microsoft::WRL::ComPtr<ID3D11Device> pDevice;
+	Microsoft::WRL::ComPtr<ID3D11DeviceContext> pDeviceContext;
+
 	// TODO D3D11_CREATE_DEVICE_DEBUG requires D3D11*SDKLayers.dll installed
 	// TODO D3D11_CREATE_DEVICE_DEBUGGABLE requires requires D3D11_1SDKLayers.dll installed and feature level 11_1
 	// const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0);
@@ -260,14 +263,20 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 		&featureLevel,
 		1,
 		D3D11_SDK_VERSION,
-		&m_pDevice,
+		&pDevice,
 		nullptr,
-		&m_pDeviceContext);
+		&pDeviceContext);
 
 	if (!SUCCEEDED(hr)) {
 		LOG->Trace("D3D11CreateDevice failed");
 		return "D3D11CreateDevice failed";
 	}
+
+	hr = pDevice.As(&m_pDevice);
+	ASSERT(SUCCEEDED(hr));
+
+	hr = pDeviceContext.As(&m_pDeviceContext);
+	ASSERT(SUCCEEDED(hr));
 
 	Microsoft::WRL::ComPtr<IDXGIDevice> pDxgiDevice;
 	hr = m_pDevice.As(&pDxgiDevice);
@@ -294,6 +303,7 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	}
 #endif
 
+	// TODO make use of this somehow - unused currently but potentially useful for debugging
 	hr = m_pDeviceContext.As(&m_pUserDefinedAnnotation);
 	ASSERT(SUCCEEDED(hr));
 
@@ -990,7 +1000,7 @@ void RageDisplay_D3D11::BindVertexBuffers( const RageSpriteVertex v[], int iNumV
 class RageCompiledGeometryD3D11 : public RageCompiledGeometry
 {
 public:
-	RageCompiledGeometryD3D11(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext) :
+	RageCompiledGeometryD3D11(ID3D11Device1* pDevice, ID3D11DeviceContext1* pDeviceContext) :
 		m_pDevice(pDevice),
 		m_pDeviceContext(pDeviceContext)
 	{}
@@ -1060,11 +1070,10 @@ public:
 					vIndexBuffer[(meshInfo.iTriangleStart + j) * 3 + k] = static_cast<std::uint16_t>(meshInfo.iVertexStart) + mesh.Triangles[j].nVertexIndices[k];
 		}
 
-		//TODO UpdateSubresource1 with D3D11_COPY_DISCARD
-		m_pDeviceContext->UpdateSubresource(m_pVertexBuffer.Get(), 0, nullptr, vVertexBuffer.data(), 0, 0);
-		m_pDeviceContext->UpdateSubresource(m_pIndexBuffer.Get(), 0, nullptr, vIndexBuffer.data(), 0, 0);
+		m_pDeviceContext->UpdateSubresource1(m_pVertexBuffer.Get(), 0, nullptr, reinterpret_cast<const void*>(vVertexBuffer.data()), 0, 0, D3D11_COPY_DISCARD);
+		m_pDeviceContext->UpdateSubresource1(m_pIndexBuffer.Get(), 0, nullptr, reinterpret_cast<const void*>(vIndexBuffer.data()), 0, 0, D3D11_COPY_DISCARD);
 		if (m_bAnyNeedsTextureMatrixScale)
-			m_pDeviceContext->UpdateSubresource(m_pVertexTextureScaleBuffer.Get(), 0, nullptr, vVertexTextureScaleBuffer.data(), 0, 0);
+			m_pDeviceContext->UpdateSubresource1(m_pVertexTextureScaleBuffer.Get(), 0, nullptr, reinterpret_cast<const void*>(vVertexTextureScaleBuffer.data()), 0, 0, D3D11_COPY_DISCARD);
 	}
 
 	void Draw( int iMeshIndex ) const
@@ -1083,8 +1092,8 @@ public:
 	}
 
 protected:
-	Microsoft::WRL::ComPtr<ID3D11Device> m_pDevice;
-	Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_pDeviceContext;
+	Microsoft::WRL::ComPtr<ID3D11Device1> m_pDevice;
+	Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_pDeviceContext;
 	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pVertexBuffer;
 	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pVertexTextureScaleBuffer;
 	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pIndexBuffer;
@@ -1689,8 +1698,7 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 		if(!RageSurfaceUtils::ConvertSurface(img, pSurface, textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3]))
 			pSurface = img;
 
-		//TODO UpdateSubresource1 with D3D11_COPY_DISCARD
-		m_pDeviceContext->UpdateSubresource(pTexture.Get(), 0, nullptr, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0);
+		m_pDeviceContext->UpdateSubresource1(pTexture.Get(), 0, nullptr, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0, D3D11_COPY_DISCARD);
 		if(pSurface != img)
 			delete pSurface;
 	}
@@ -1718,6 +1726,7 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	return reinterpret_cast<std::uintptr_t>(pTex);
 }
 
+// TODO - remove xoffset, yoffset, width and height parameters since this function is only used for updating the whole texture anyway
 void RageDisplay_D3D11::UpdateTexture(
 	std::uintptr_t uTexHandle,
 	RageSurface* img,
@@ -1748,8 +1757,8 @@ void RageDisplay_D3D11::UpdateTexture(
 		box.bottom = static_cast<UINT>(yoffset + height);
 		box.back = 0;
 
-		//TODO UpdateSubresource1 with D3D11_COPY_DISCARD
-		m_pDeviceContext->UpdateSubresource(pTex->m_pTexture.Get(), 0, &box, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0);
+		// TODO - this will fail if we're updating just a part of a resource but this function is only ever used by MoveTexture and it always updates the whole texture
+		m_pDeviceContext->UpdateSubresource1(pTex->m_pTexture.Get(), 0, &box, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0, D3D11_COPY_DISCARD);
 		if (pSurface != img)
 			delete pSurface;
 	}

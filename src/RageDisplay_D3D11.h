@@ -113,8 +113,8 @@ protected:
 	HMODULE m_dxgiDebugModule = nullptr;
 	Microsoft::WRL::ComPtr<IDXGIFactory2> m_pDxgiFactory;
 	Microsoft::WRL::ComPtr<IDXGIAdapter1> m_pDxgiAdapter;
-	Microsoft::WRL::ComPtr<ID3D11Device> m_pDevice;
-	Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_pDeviceContext;
+	Microsoft::WRL::ComPtr<ID3D11Device1> m_pDevice;
+	Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_pDeviceContext;
 	Microsoft::WRL::ComPtr<ID3DUserDefinedAnnotation> m_pUserDefinedAnnotation;
 	Microsoft::WRL::ComPtr<IDXGISwapChain1> m_pSwapchain;
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_pRenderTarget;
