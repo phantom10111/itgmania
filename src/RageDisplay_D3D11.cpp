@@ -1768,7 +1768,7 @@ void RageDisplay_D3D11::UpdateTexture(
 		HRESULT hr = m_pDeviceContext->Map(pTex->m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
 		ASSERT(SUCCEEDED(hr));
 
-		RageSurface* pSurface = CreateSurfaceFrom(width, height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData) + xoffset * desc.bpp / 4 + yoffset * mappedSubresource.RowPitch, mappedSubresource.RowPitch);
+		RageSurface* pSurface = CreateSurfaceFrom(width, height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData) + xoffset * desc.bpp / 8 + yoffset * mappedSubresource.RowPitch, mappedSubresource.RowPitch);
 		RageSurfaceUtils::Blit(img, pSurface, width, height);
 		delete pSurface;
 	}

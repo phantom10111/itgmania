@@ -33,7 +33,7 @@ public:
 	void SetBlendMode( BlendMode mode );
 	bool SupportsTextureFormat( RagePixelFormat pixfmt, bool realtime=false );
 	bool SupportsThreadedRendering();
-	bool SupportsPerVertexMatrixScale() { return false; }
+	bool SupportsPerVertexMatrixScale() { return true; }
 	std::uintptr_t CreateTexture(
 		RagePixelFormat pixfmt,
 		RageSurface* img,
