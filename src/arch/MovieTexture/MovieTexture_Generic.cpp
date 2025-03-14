@@ -167,7 +167,7 @@ private:
 			m_SurfaceFormat.Mask[2],
 			m_SurfaceFormat.Mask[3], nullptr, 1 );
 
-		m_uTexHandle = DISPLAY->CreateTexture( m_PixFmt, pSurface, false, RageDisplay::ResourceUsage::UPDATED_OFTEN );
+		m_uTexHandle = DISPLAY->CreateTexture( m_PixFmt, pSurface, false, ResourceUsagePattern::UPDATED_OFTEN );
 		delete pSurface;
 	}
 
@@ -300,7 +300,7 @@ void MovieTexture_Generic::CreateTexture()
 		return;
 	}
 
-	m_uTexHandle = DISPLAY->CreateTexture( pixfmt, m_pSurface, false, RageDisplay::ResourceUsage::UPDATED_OFTEN );
+	m_uTexHandle = DISPLAY->CreateTexture( pixfmt, m_pSurface, false, ResourceUsagePattern::UPDATED_OFTEN );
 }
 
 /* Handle decoding for a frame.  Return true if a frame was decoded, false if not
@@ -469,9 +469,7 @@ void MovieTexture_Generic::UpdateFrame()
 		{
 			DISPLAY->UpdateTexture(
 				m_pTextureIntermediate->GetTexHandle(),
-				m_pSurface,
-				0, 0,
-				m_pSurface->w, m_pSurface->h );
+				m_pSurface );
 		}
 		m_pRenderTarget->BeginRenderingTo( false );
 		m_pSprite->Draw();
@@ -483,9 +481,7 @@ void MovieTexture_Generic::UpdateFrame()
 		{
 			DISPLAY->UpdateTexture(
 				m_uTexHandle,
-				m_pSurface,
-				0, 0,
-				m_iImageWidth, m_iImageHeight );
+				m_pSurface );
 		}
 	}
 }

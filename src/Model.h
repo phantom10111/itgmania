@@ -10,7 +10,7 @@
 #include <map>
 
 class RageModelGeometry;
-class RageCompiledGeometry;
+class RageCompiledModelGeometry;
 
 class Model : public Actor
 {
@@ -71,7 +71,7 @@ private:
 
 	// If any vertex has a bone weight, then then render from m_pTempGeometry.  
 	// Otherwise, render directly from m_pGeometry.
-	RageCompiledGeometry*		m_pTempGeometry;
+	RageCompiledModelGeometry*	m_pTempGeometry;
 	void UpdateTempGeometry();
 
 	/* Keep a copy of the mesh data only if m_pTempGeometry is in use.  The normal and

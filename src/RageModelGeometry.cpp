@@ -13,12 +13,12 @@
 RageModelGeometry::RageModelGeometry ()
 {
 	m_iRefCount = 1;
-	m_pCompiledGeometry = DISPLAY->CreateCompiledGeometry();
+	m_pCompiledGeometry = DISPLAY->CreateCompiledModelGeometry();
 }
 
 RageModelGeometry::~RageModelGeometry ()
 {
-	DISPLAY->DeleteCompiledGeometry( m_pCompiledGeometry );
+	delete m_pCompiledGeometry;
 }
 
 void RageModelGeometry::OptimizeBones()

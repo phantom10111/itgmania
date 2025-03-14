@@ -776,7 +776,7 @@ void RageDisplay_D3D::SendCurrentMatrices()
 	}
 }
 
-class RageCompiledGeometrySWD3D : public RageCompiledGeometry
+class RageCompiledModelGeometrySWD3D : public RageCompiledModelGeometry
 {
 public:
 	void Allocate( const std::vector<msMesh> &vMeshes )
@@ -836,14 +836,9 @@ protected:
 	std::vector<msTriangle>		m_vTriangles;
 };
 
-RageCompiledGeometry* RageDisplay_D3D::CreateCompiledGeometry()
+RageCompiledModelGeometry* RageDisplay_D3D::CreateCompiledModelGeometry()
 {
-	return new RageCompiledGeometrySWD3D;
-}
-
-void RageDisplay_D3D::DeleteCompiledGeometry( RageCompiledGeometry* p )
-{
-	delete p;
+	return new RageCompiledModelGeometrySWD3D;
 }
 
 void RageDisplay_D3D::DrawQuadsInternal( const RageSpriteVertex v[], int iNumVerts )
@@ -996,7 +991,7 @@ void RageDisplay_D3D::DrawTrianglesInternal( const RageSpriteVertex v[], int iNu
 	);
 }
 
-void RageDisplay_D3D::DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex )
+void RageDisplay_D3D::DrawCompiledModelGeometryInternal( const RageCompiledModelGeometry *p, int iMeshIndex )
 {
 	SendCurrentMatrices();
 
@@ -1410,15 +1405,14 @@ std::uintptr_t RageDisplay_D3D::CreateTexture(
 		g_TexResourceToTexturePalette[uTexHandle] = pal;
 	}
 
-	UpdateTexture( uTexHandle, img, 0, 0, img->w, img->h );
+	UpdateTexture( uTexHandle, img );
 
 	return uTexHandle;
 }
 
 void RageDisplay_D3D::UpdateTexture(
 	std::uintptr_t uTexHandle,
-	RageSurface* img,
-	int xoffset, int yoffset, int width, int height )
+	RageSurface* img )
 {
 	IDirect3DTexture9* pTex = reinterpret_cast<IDirect3DTexture9*>(uTexHandle);
 	ASSERT( pTex != nullptr );

@@ -1035,7 +1035,7 @@ void RageDisplay_Legacy::SendCurrentMatrices()
 	glLoadMatrixf( (const float*)GetTextureTop() );
 }
 
-class RageCompiledGeometrySWOGL : public RageCompiledGeometry
+class RageCompiledModelGeometrySWOGL : public RageCompiledModelGeometry
 {
 public:
 
@@ -1149,7 +1149,7 @@ static void InvalidateObjects()
 		it->Invalidate();
 }
 
-class RageCompiledGeometryHWOGL : public RageCompiledGeometrySWOGL, public InvalidateObject
+class RageCompiledModelGeometryHWOGL : public RageCompiledModelGeometrySWOGL, public InvalidateObject
 {
 protected:
 	// vertex buffer object names
@@ -1163,8 +1163,8 @@ protected:
 	void UploadData();
 
 public:
-	RageCompiledGeometryHWOGL();
-	~RageCompiledGeometryHWOGL();
+	RageCompiledModelGeometryHWOGL();
+	~RageCompiledModelGeometryHWOGL();
 
 	/* This is called when our OpenGL context is invalidated. */
 	void Invalidate();
@@ -1174,7 +1174,7 @@ public:
 	void Draw( int iMeshIndex ) const;
 };
 
-RageCompiledGeometryHWOGL::RageCompiledGeometryHWOGL()
+RageCompiledModelGeometryHWOGL::RageCompiledModelGeometryHWOGL()
 {
 	m_nPositions = 0;
 	m_nTextureCoords = 0;
@@ -1185,7 +1185,7 @@ RageCompiledGeometryHWOGL::RageCompiledGeometryHWOGL()
 	AllocateBuffers();
 }
 
-RageCompiledGeometryHWOGL::~RageCompiledGeometryHWOGL()
+RageCompiledModelGeometryHWOGL::~RageCompiledModelGeometryHWOGL()
 {
 	DebugFlushGLErrors();
 
@@ -1201,7 +1201,7 @@ RageCompiledGeometryHWOGL::~RageCompiledGeometryHWOGL()
 	DebugAssertNoGLError();
 }
 
-void RageCompiledGeometryHWOGL::AllocateBuffers()
+void RageCompiledModelGeometryHWOGL::AllocateBuffers()
 {
 	DebugFlushGLErrors();
 
@@ -1236,7 +1236,7 @@ void RageCompiledGeometryHWOGL::AllocateBuffers()
 	}
 }
 
-void RageCompiledGeometryHWOGL::UploadData()
+void RageCompiledModelGeometryHWOGL::UploadData()
 {
 	DebugFlushGLErrors();
 
@@ -1290,7 +1290,7 @@ void RageCompiledGeometryHWOGL::UploadData()
 	}
 }
 
-void RageCompiledGeometryHWOGL::Invalidate()
+void RageCompiledModelGeometryHWOGL::Invalidate()
 {
 	/* Our vertex buffers no longer exist.  Reallocate and reupload. */
 	m_nPositions = 0;
@@ -1302,11 +1302,11 @@ void RageCompiledGeometryHWOGL::Invalidate()
 	UploadData();
 }
 
-void RageCompiledGeometryHWOGL::Allocate( const std::vector<msMesh> &vMeshes )
+void RageCompiledModelGeometryHWOGL::Allocate( const std::vector<msMesh> &vMeshes )
 {
 	DebugFlushGLErrors();
 
-	RageCompiledGeometrySWOGL::Allocate( vMeshes );
+	RageCompiledModelGeometrySWOGL::Allocate( vMeshes );
 	glBindBufferARB( GL_ARRAY_BUFFER_ARB, m_nPositions );
 	DebugAssertNoGLError();
 	glBufferDataARB(
@@ -1352,14 +1352,14 @@ void RageCompiledGeometryHWOGL::Allocate( const std::vector<msMesh> &vMeshes )
 		GL_STATIC_DRAW_ARB );
 }
 
-void RageCompiledGeometryHWOGL::Change( const std::vector<msMesh> &vMeshes )
+void RageCompiledModelGeometryHWOGL::Change( const std::vector<msMesh> &vMeshes )
 {
-	RageCompiledGeometrySWOGL::Change( vMeshes );
+	RageCompiledModelGeometrySWOGL::Change( vMeshes );
 
 	UploadData();
 }
 
-void RageCompiledGeometryHWOGL::Draw( int iMeshIndex ) const
+void RageCompiledModelGeometryHWOGL::Draw( int iMeshIndex ) const
 {
 	DebugFlushGLErrors();
 
@@ -1476,17 +1476,12 @@ void RageCompiledGeometryHWOGL::Draw( int iMeshIndex ) const
 	}
 }
 
-RageCompiledGeometry* RageDisplay_Legacy::CreateCompiledGeometry()
+RageCompiledModelGeometry* RageDisplay_Legacy::CreateCompiledModelGeometry()
 {
 	if (GLEW_ARB_vertex_buffer_object)
-		return new RageCompiledGeometryHWOGL;
+		return new RageCompiledModelGeometryHWOGL;
 	else
-		return new RageCompiledGeometrySWOGL;
-}
-
-void RageDisplay_Legacy::DeleteCompiledGeometry( RageCompiledGeometry* p )
-{
-	delete p;
+		return new RageCompiledModelGeometrySWOGL;
 }
 
 void RageDisplay_Legacy::DrawQuadsInternal( const RageSpriteVertex v[], int iNumVerts )
@@ -1573,7 +1568,7 @@ void RageDisplay_Legacy::DrawTrianglesInternal( const RageSpriteVertex v[], int 
 	glDrawArrays( GL_TRIANGLES, 0, iNumVerts );
 }
 
-void RageDisplay_Legacy::DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex )
+void RageDisplay_Legacy::DrawCompiledModelGeometryInternal( const RageCompiledModelGeometry *p, int iMeshIndex )
 {
 	TurnOffHardwareVBO();
 	SendCurrentMatrices();
@@ -2204,7 +2199,7 @@ std::uintptr_t RageDisplay_Legacy::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* pImg,
 	bool bGenerateMipMaps,
-	ResourceUsage usage )
+	ResourceUsagePattern usagePattern )
 {
 	ASSERT( pixfmt < NUM_RagePixelFormat );
 
@@ -2387,7 +2382,7 @@ public:
 		pSurface->pixels = (std::uint8_t *) BUFFER_OFFSET(0);
 
 		if (bChanged)
-			DISPLAY->UpdateTexture( m_iTexHandle, pSurface, 0, 0, pSurface->w, pSurface->h );
+			DISPLAY->UpdateTexture( m_iTexHandle, pSurface );
 
 		pSurface->pixels = nullptr;
 
@@ -2421,8 +2416,7 @@ RageTextureLock *RageDisplay_Legacy::CreateTextureLock()
 
 void RageDisplay_Legacy::UpdateTexture(
 	std::uintptr_t iTexHandle,
-	RageSurface* pImg,
-	int iXOffset, int iYOffset, int iWidth, int iHeight )
+	RageSurface* pImg )
 {
 	glBindTexture( GL_TEXTURE_2D, static_cast<GLuint>(iTexHandle) );
 

@@ -38,12 +38,10 @@ public:
 		RagePixelFormat pixfmt,
 		RageSurface* img,
 		bool bGenerateMipMaps,
-		ResourceUsage usage );
+		ResourceUsagePattern usagePattern );
 	void UpdateTexture(
 		std::uintptr_t iTexHandle,
-		RageSurface* img,
-		int xoffset, int yoffset, int width, int height
-		);
+		RageSurface* img );
 	void DeleteTexture( std::uintptr_t iTexHandle );
 	RageTextureLock* CreateTextureLock();
 	void ClearAllTextures();
@@ -87,8 +85,7 @@ public:
 	void SetSphereEnvironmentMapping( TextureUnit tu, bool b );
 	void SetCelShaded( int stage );
 
-	RageCompiledGeometry* CreateCompiledGeometry();
-	void DeleteCompiledGeometry( RageCompiledGeometry* p );
+	RageCompiledModelGeometry* CreateCompiledModelGeometry();
 
 protected:
 	void DrawQuadsInternal( const RageSpriteVertex v[], int iNumVerts );
@@ -97,7 +94,7 @@ protected:
 	void DrawStripInternal( const RageSpriteVertex v[], int iNumVerts );
 	void DrawTrianglesInternal( const RageSpriteVertex v[], int iNumVerts );
 	void DrawSymmetricQuadStripInternal( const RageSpriteVertex v[], int iNumVerts );
-	void DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex );
+	void DrawCompiledModelGeometryInternal( const RageCompiledModelGeometry *p, int iMeshIndex );
 	void DrawLineStripInternal( const RageSpriteVertex v[], int iNumVerts, float LineWidth );
 
 	RString TryVideoMode( const VideoModeParams &p, bool &bNewDeviceOut );

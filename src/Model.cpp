@@ -55,8 +55,7 @@ void Model::Clear()
 	m_pCurAnimation = nullptr;
 	RecalcAnimationLengthSeconds();
 
-	if( m_pTempGeometry )
-		DISPLAY->DeleteCompiledGeometry( m_pTempGeometry );
+	SAFE_DELETE( m_pTempGeometry );
 }
 
 void Model::Load( const RString &sFile )
@@ -105,7 +104,7 @@ void Model::LoadPieces( const RString &sMeshesPath, const RString &sMaterialsPat
 	if( m_pGeometry->HasAnyPerVertexBones() )
 	{
 		m_vTempMeshes = m_pGeometry->m_Meshes;
-		m_pTempGeometry = DISPLAY->CreateCompiledGeometry();
+		m_pTempGeometry = DISPLAY->CreateCompiledModelGeometry();
 		m_pTempGeometry->Set( m_vTempMeshes, this->MaterialsNeedNormals() );
 	}
 	RecalcAnimationLengthSeconds();
@@ -481,8 +480,8 @@ void Model::DrawMesh( int i ) const
 	}
 
 	// Draw it
-	const RageCompiledGeometry* TempGeometry = m_pTempGeometry ? m_pTempGeometry : m_pGeometry->m_pCompiledGeometry;
-	DISPLAY->DrawCompiledGeometry( TempGeometry, i, m_pGeometry->m_Meshes );
+	const RageCompiledModelGeometry* TempGeometry = m_pTempGeometry ? m_pTempGeometry : m_pGeometry->m_pCompiledGeometry;
+	DISPLAY->DrawCompiledModelGeometry( TempGeometry, i, m_pGeometry->m_Meshes );
 
 	if( pMesh->m_iBoneIndex != -1 )
 		DISPLAY->PopMatrix();

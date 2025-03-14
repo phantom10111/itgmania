@@ -889,9 +889,9 @@ void RageDisplay::DrawTriangles( const RageSpriteVertex v[], int iNumVerts )
 	StatsAddVerts(iNumVerts);
 }
 
-void RageDisplay::DrawCompiledGeometry( const RageCompiledGeometry *p, int iMeshIndex, const std::vector<msMesh> &vMeshes )
+void RageDisplay::DrawCompiledModelGeometry( const RageCompiledModelGeometry *p, int iMeshIndex, const std::vector<msMesh> &vMeshes )
 {
-	this->DrawCompiledGeometryInternal( p, iMeshIndex );
+	this->DrawCompiledModelGeometryInternal( p, iMeshIndex );
 
 	StatsAddVerts( vMeshes[iMeshIndex].Triangles.size() );
 }
@@ -969,15 +969,12 @@ void RageDisplay::FrameLimitAfterVsync()
 }
 
 
-RageCompiledGeometry::~RageCompiledGeometry()
+RageCompiledModelGeometry::~RageCompiledModelGeometry()
 {
-	m_bNeedsNormals = false;
 }
 
-void RageCompiledGeometry::Set( const std::vector<msMesh> &vMeshes, bool bNeedsNormals )
+void RageCompiledModelGeometry::Set( const std::vector<msMesh> &vMeshes )
 {
-	m_bNeedsNormals = bNeedsNormals;
-
 	std::size_t totalVerts = 0;
 	std::size_t totalTriangles = 0;
 

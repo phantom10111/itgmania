@@ -25,11 +25,10 @@ public:
 		RagePixelFormat,
 		RageSurface* /* img */,
 		bool /* bGenerateMipMaps */,
-		ResourceUsage ) { return 1; }
+		ResourceUsagePattern ) { return 1; }
 	void UpdateTexture(
 		std::uintptr_t /* iTexHandle */,
-		RageSurface* /* img */,
-		int /* xoffset */, int /* yoffset */, int /* width */, int /* height */
+		RageSurface* /* img */
 		) { }
 	void DeleteTexture( std::uintptr_t /* iTexHandle */ ) { }
 	void ClearAllTextures() { }
@@ -66,8 +65,7 @@ public:
 	void SetSphereEnvironmentMapping( TextureUnit /* tu */, bool /* b */ ) { }
 	void SetCelShaded( int /* stage */ ) { }
 
-	RageCompiledGeometry* CreateCompiledGeometry();
-	void DeleteCompiledGeometry( RageCompiledGeometry* );
+	RageCompiledModelGeometry* CreateCompiledModelGeometry();
 
 protected:
 	void DrawQuadsInternal( const RageSpriteVertex v[], int /* iNumVerts */ ) { }
@@ -75,7 +73,7 @@ protected:
 	void DrawFanInternal( const RageSpriteVertex v[], int /* iNumVerts */ ) { }
 	void DrawStripInternal( const RageSpriteVertex v[], int /* iNumVerts */ ) { }
 	void DrawTrianglesInternal( const RageSpriteVertex v[], int /* iNumVerts */ ) { }
-	void DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int /* iMeshIndex */ ) { }
+	void DrawCompiledModelGeometryInternal( const RageCompiledModelGeometry *p, int /* iMeshIndex */ ) { }
 	void DrawLineStripInternal( const RageSpriteVertex v[], int /* iNumVerts */, float /* LineWidth */ ) { }
 	void DrawSymmetricQuadStripInternal( const RageSpriteVertex v[], int /* iNumVerts */ ) { }
 

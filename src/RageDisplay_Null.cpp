@@ -128,7 +128,7 @@ void RageDisplay_Null::EndFrame()
 }
 
 
-class RageCompiledGeometryNull : public RageCompiledGeometry
+class RageCompiledModelGeometryNull : public RageCompiledModelGeometry
 {
 public:
 
@@ -137,13 +137,9 @@ public:
 	void Draw( int iMeshIndex ) const {}
 };
 
-RageCompiledGeometry* RageDisplay_Null::CreateCompiledGeometry()
+RageCompiledModelGeometry* RageDisplay_Null::CreateCompiledModelGeometry()
 {
-	return new RageCompiledGeometryNull;
-}
-
-void RageDisplay_Null::DeleteCompiledGeometry( RageCompiledGeometry* p )
-{
+	return new RageCompiledModelGeometryNull;
 }
 
 /*

@@ -245,7 +245,7 @@ struct ImageTexture: public RageTexture
 		ASSERT( DISPLAY->SupportsTextureFormat(pf) );
 
 		ASSERT(m_pImage != nullptr);
-		m_uTexHandle = DISPLAY->CreateTexture( pf, m_pImage, false, RageDisplay::ResourceUsage::UPDATED_RARELY );
+		m_uTexHandle = DISPLAY->CreateTexture( pf, m_pImage, false, ResourceUsagePattern::UPDATED_RARELY );
 
 		CreateFrameRects();
 	}

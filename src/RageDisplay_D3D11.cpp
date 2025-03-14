@@ -997,10 +997,10 @@ void RageDisplay_D3D11::BindVertexBuffers( const RageSpriteVertex v[], int iNumV
 	m_pDeviceContext->VSSetShader(m_pSpriteVertexShader.Get(), nullptr, 0);
 }
 
-class RageCompiledGeometryD3D11 : public RageCompiledGeometry
+class RageCompiledModelGeometryD3D11 : public RageCompiledModelGeometry
 {
 public:
-	RageCompiledGeometryD3D11(ID3D11Device1* pDevice, ID3D11DeviceContext1* pDeviceContext) :
+	RageCompiledModelGeometryD3D11(ID3D11Device1* pDevice, ID3D11DeviceContext1* pDeviceContext) :
 		m_pDevice(pDevice),
 		m_pDeviceContext(pDeviceContext)
 	{}
@@ -1099,14 +1099,9 @@ protected:
 	Microsoft::WRL::ComPtr<ID3D11Buffer> m_pIndexBuffer;
 };
 
-RageCompiledGeometry* RageDisplay_D3D11::CreateCompiledGeometry()
+RageCompiledModelGeometry* RageDisplay_D3D11::CreateCompiledModelGeometry()
 {
-	return new RageCompiledGeometryD3D11(m_pDevice.Get(), m_pDeviceContext.Get());
-}
-
-void RageDisplay_D3D11::DeleteCompiledGeometry( RageCompiledGeometry* p )
-{
-	delete p;
+	return new RageCompiledModelGeometryD3D11(m_pDevice.Get(), m_pDeviceContext.Get());
 }
 
 void RageDisplay_D3D11::DrawQuadsInternal( const RageSpriteVertex v[], int iNumVerts )
@@ -1276,7 +1271,7 @@ void RageDisplay_D3D11::DrawTrianglesInternal( const RageSpriteVertex v[], int i
 	m_pDeviceContext->Draw(iNumVerts, 0);
 }
 
-void RageDisplay_D3D11::DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex )
+void RageDisplay_D3D11::DrawCompiledModelGeometryInternal( const RageCompiledModelGeometry *p, int iMeshIndex )
 {
 	if (p->NeedsTextureMatrixScale())
 	{
@@ -1667,10 +1662,10 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	RagePixelFormat pixfmt,
 	RageSurface* img,
 	bool bGenerateMipMaps,
-	ResourceUsage usage )
+	ResourceUsagePattern usagePattern )
 {
-	// Since we are using D3D11_USAGE_DYNAMIC for ResourceUsage::UPDATED_OFTEN D3D11 won't support mipmaps in that case, but that's probably fine
-	ASSERT(!bGenerateMipMaps || usage != ResourceUsage::UPDATED_OFTEN);
+	// Since we are using D3D11_USAGE_DYNAMIC for ResourceUsagePattern::UPDATED_OFTEN D3D11 won't support mipmaps in that case, but that's probably fine
+	ASSERT(!bGenerateMipMaps || usagePattern != ResourceUsagePattern::UPDATED_OFTEN);
 
 	D3D11_TEXTURE2D_DESC textureDesc;
 	textureDesc.Width = img->w;
@@ -1679,9 +1674,9 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	textureDesc.ArraySize = 1;
 	textureDesc.Format = DXGI_FORMATS[pixfmt];
 	textureDesc.SampleDesc = { 1, 0 };
-	textureDesc.Usage = usage == ResourceUsage::UPDATED_RARELY ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
+	textureDesc.Usage = usagePattern == ResourceUsagePattern::UPDATED_RARELY ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
 	textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (bGenerateMipMaps ? D3D11_BIND_RENDER_TARGET: 0);
-	textureDesc.CPUAccessFlags = usage == ResourceUsage::UPDATED_RARELY ? 0 : D3D11_CPU_ACCESS_WRITE;
+	textureDesc.CPUAccessFlags = usagePattern == ResourceUsagePattern::UPDATED_RARELY ? 0 : D3D11_CPU_ACCESS_WRITE;
 	textureDesc.MiscFlags = bGenerateMipMaps ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
 
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> pTexture;
@@ -1692,7 +1687,7 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 	// TODO this whole block is pretty much identical to RageDisplay_D3D11::UpdateTexture() (except for offset)
 	// TODO does it matter if we update the texture here or just give initial data to CreateTexture2D()?
 	const RagePixelFormatDesc& desc = PIXEL_FORMAT_DESC[pixfmt];
-	if (usage == ResourceUsage::UPDATED_RARELY)
+	if (usagePattern == ResourceUsagePattern::UPDATED_RARELY)
 	{
 		RageSurface* pSurface;
 		if(!RageSurfaceUtils::ConvertSurface(img, pSurface, textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3]))
@@ -1729,16 +1724,12 @@ std::uintptr_t RageDisplay_D3D11::CreateTexture(
 // TODO - remove xoffset, yoffset, width and height parameters since this function is only used for updating the whole texture anyway
 void RageDisplay_D3D11::UpdateTexture(
 	std::uintptr_t uTexHandle,
-	RageSurface* img,
-	int xoffset, int yoffset, int width, int height )
+	RageSurface* img )
 {
 	RageTexture_D3D11* pTex = reinterpret_cast<RageTexture_D3D11*>(uTexHandle);
 
 	D3D11_TEXTURE2D_DESC textureDesc;
 	pTex->m_pTexture->GetDesc(&textureDesc);
-
-	ASSERT(static_cast<UINT>(xoffset + width) <= textureDesc.Width);
-	ASSERT(static_cast<UINT>(yoffset + height) <= textureDesc.Height);
 
 	// TODO do we really need 2 separate paths here to update the texture?
 	// TODO this whole block is pretty much identical to RageDisplay_D3D11::CreateTexture() (except for offset)
@@ -1749,16 +1740,8 @@ void RageDisplay_D3D11::UpdateTexture(
 		if (!RageSurfaceUtils::ConvertSurface(img, pSurface, textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3]))
 			pSurface = img;
 
-		D3D11_BOX box;
-		box.left = static_cast<UINT>(xoffset);
-		box.top = static_cast<UINT>(yoffset);
-		box.front = 0;
-		box.right = static_cast<UINT>(xoffset + width);
-		box.bottom = static_cast<UINT>(yoffset + height);
-		box.back = 0;
-
 		// TODO - this will fail if we're updating just a part of a resource but this function is only ever used by MoveTexture and it always updates the whole texture
-		m_pDeviceContext->UpdateSubresource1(pTex->m_pTexture.Get(), 0, &box, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0, D3D11_COPY_DISCARD);
+		m_pDeviceContext->UpdateSubresource1(pTex->m_pTexture.Get(), 0, nullptr, reinterpret_cast<const void*>(pSurface->pixels), pSurface->pitch, 0, D3D11_COPY_DISCARD);
 		if (pSurface != img)
 			delete pSurface;
 	}
@@ -1768,8 +1751,8 @@ void RageDisplay_D3D11::UpdateTexture(
 		HRESULT hr = m_pDeviceContext->Map(pTex->m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedSubresource);
 		ASSERT(SUCCEEDED(hr));
 
-		RageSurface* pSurface = CreateSurfaceFrom(width, height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData) + xoffset * desc.bpp / 8 + yoffset * mappedSubresource.RowPitch, mappedSubresource.RowPitch);
-		RageSurfaceUtils::Blit(img, pSurface, width, height);
+		RageSurface* pSurface = CreateSurfaceFrom(textureDesc.Width, textureDesc.Height, desc.bpp, desc.masks[0], desc.masks[1], desc.masks[2], desc.masks[3], reinterpret_cast<std::uint8_t*>(mappedSubresource.pData), mappedSubresource.RowPitch);
+		RageSurfaceUtils::Blit(img, pSurface);
 		delete pSurface;
 	}
 

@@ -26,14 +26,86 @@ enum TextureUnit
 	NUM_TextureUnit
 };
 
-// RageCompiledGeometry holds vertex data in a format that is most efficient
-// for the graphics API.
-class RageCompiledGeometry
+// TODO this is appropriate for D3D11 for now, but should probably be extended for other APIs
+enum class ResourceUsagePattern
+{
+	UPDATED_RARELY,
+	UPDATED_OFTEN,
+};
+
+class RageBuffer
 {
 public:
-	virtual ~RageCompiledGeometry();
+	enum class Usage
+	{
+		VERTEX_BUFFER,
+		INDEX_BUFFER,
+		UNIFORM_BUFFER,
+	};
 
-	void Set( const std::vector<msMesh> &vMeshes, bool bNeedsNormals );
+	RageBuffer(std::size_t iSize, Usage usage) :
+		m_iSize(iSize),
+		m_Usage(usage)
+	{
+	}
+
+	virtual ~RageBuffer();
+
+	// TODO - should we allow partial updates?
+	virtual void Update( const void* pData ) = 0;
+
+	std::size_t GetSize() const
+	{
+		return m_iSize;
+	}
+
+	Usage GetUsage() const
+	{
+		return m_Usage;
+	}
+
+protected:
+	std::size_t m_iSize;
+	Usage m_Usage;
+};
+
+enum class RagePrimitiveTopology
+{
+	QUAD_LIST,
+	QUAD_STRIP,
+	TRIANGLE_FAN,
+	TRIANGLE_STRIP,
+	TRIANGLE_LIST,
+	LINE_STRIP,
+	SYMMETRIC_QUAD_STRIP,
+	CIRCLE,
+};
+
+// RageCompiledModelGeometry and RageCompiledSpriteGeometry hold vertex data
+// in a format that is most efficient for the graphics API. 
+class RageCompiledSpriteGeometry
+{
+public:
+	virtual ~RageCompiledSpriteGeometry();
+
+	// Basic set that doesn't take an index buffer as input, mimics legacy Draw* API.
+	// Topologies that are not directly supported by RageDisplay are emulated using simpler topology and an index buffer.
+	void Set( RagePrimitiveTopology topology, const RageSpriteVertex* aVertices, std::size_t numVertices );
+
+	// Set that takes an optional index buffer and just uses the suppied geometry as-is, without doing any transforms.
+	// Primitive topology passed must be supported by the current RageDisplay.
+	// Exact topologies supported will vary by RageDisplay, but it's safe to assume that TRIANGLE_LIST, TRIANGLE_STRIP and LINE_STRIP are always supported.
+	// TODO - maybe add RageDisplay::SupportsPrimitiveTopology(). Or maybe just assume that those 3 above are the only actually supported, which seems to align with modern graphics APIs
+	virtual void SetDirect( RagePrimitiveTopology topology, const RageSpriteVertex* aVertices, std::size_t numVertices, const std::uint16_t* aIndices, std::size_t numIndices ) = 0;
+	virtual void Draw() const = 0;
+};
+
+class RageCompiledModelGeometry
+{
+public:
+	virtual ~RageCompiledModelGeometry();
+
+	void Set( const std::vector<msMesh> &vMeshes );
 
 	virtual void Allocate( const std::vector<msMesh> &vMeshes ) = 0;	// allocate space
 	virtual void Change( const std::vector<msMesh> &vMeshes ) = 0;	// new data must be the same size as was passed to Set()
@@ -54,7 +126,6 @@ protected:
 		bool m_bNeedsTextureMatrixScale;
 	};
 	std::vector<MeshInfo>	m_vMeshInfo;
-	bool m_bNeedsNormals;
 	bool m_bAnyNeedsTextureMatrixScale;
 };
 
@@ -218,13 +289,6 @@ class RageDisplay
 
 public:
 
-	// TODO this is appropriate for D3D11 for now, but should probably be extended for other APIs
-	enum class ResourceUsage
-	{
-		UPDATED_RARELY,
-		UPDATED_OFTEN,
-	};
-
 	struct RagePixelFormatDesc {
 		int bpp;
 		unsigned int masks[4];
@@ -272,12 +336,11 @@ public:
 		RagePixelFormat pixfmt,		// format of img and of texture in video mem
 		RageSurface* img,		// must be in pixfmt
 		bool bGenerateMipMaps,
-		ResourceUsage usage
+		ResourceUsagePattern usagePattern
 		) = 0;
 	virtual void UpdateTexture(
 		std::uintptr_t iTexHandle,
-		RageSurface* img,
-		int xoffset, int yoffset, int width, int height
+		RageSurface* img
 		) = 0;
 	virtual void DeleteTexture( std::uintptr_t iTexHandle ) = 0;
 	/* Return an object to lock pixels for streaming. If not supported, returns nullptr.
@@ -344,15 +407,16 @@ public:
 	virtual void SetSphereEnvironmentMapping( TextureUnit tu, bool b ) = 0;
 	virtual void SetCelShaded( int stage ) = 0;
 
-	virtual RageCompiledGeometry* CreateCompiledGeometry() = 0;
-	virtual void DeleteCompiledGeometry( RageCompiledGeometry* p ) = 0;
+	virtual RageBuffer* CreateBuffer() = 0;
+	virtual RageCompiledSpriteGeometry* CreateCompiledSpriteGeometry() = 0;
+	virtual RageCompiledModelGeometry* CreateCompiledModelGeometry() = 0;
 
 	void DrawQuads( const RageSpriteVertex v[], int iNumVerts );
 	void DrawQuadStrip( const RageSpriteVertex v[], int iNumVerts );
 	void DrawFan( const RageSpriteVertex v[], int iNumVerts );
 	void DrawStrip( const RageSpriteVertex v[], int iNumVerts );
 	void DrawTriangles( const RageSpriteVertex v[], int iNumVerts );
-	void DrawCompiledGeometry( const RageCompiledGeometry *p, int iMeshIndex, const std::vector<msMesh> &vMeshes );
+	void DrawCompiledModelGeometry( const RageCompiledModelGeometry *p, int iMeshIndex, const std::vector<msMesh> &vMeshes );
 	void DrawLineStrip( const RageSpriteVertex v[], int iNumVerts, float LineWidth );
 	void DrawSymmetricQuadStrip( const RageSpriteVertex v[], int iNumVerts );
 	void DrawCircle( const RageSpriteVertex &v, float radius );
@@ -382,7 +446,7 @@ protected:
 	virtual void DrawFanInternal( const RageSpriteVertex v[], int iNumVerts ) = 0;
 	virtual void DrawStripInternal( const RageSpriteVertex v[], int iNumVerts ) = 0;
 	virtual void DrawTrianglesInternal( const RageSpriteVertex v[], int iNumVerts ) = 0;
-	virtual void DrawCompiledGeometryInternal( const RageCompiledGeometry *p, int iMeshIndex ) = 0;
+	virtual void DrawCompiledModelGeometryInternal( const RageCompiledModelGeometry *p, int iMeshIndex ) = 0;
 	virtual void DrawLineStripInternal( const RageSpriteVertex v[], int iNumVerts, float LineWidth );
 	virtual void DrawSymmetricQuadStripInternal( const RageSpriteVertex v[], int iNumVerts ) = 0;
 	virtual void DrawCircleInternal( const RageSpriteVertex &v, float radius );
