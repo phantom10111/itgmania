@@ -253,8 +253,8 @@ RString RageDisplay_D3D11::Init( const VideoModeParams &p, bool /* bAllowUnaccel
 	// const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_DEBUGGABLE : 0);
 	const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | (bDebugRenderer ? D3D11_CREATE_DEVICE_DEBUG : 0);
 	const D3D_DRIVER_TYPE driverType = pDxgiAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
-	// TODO 11_1 or 11_0?
-	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
+	// TODO 11_1 or 11_0? Note that even with 11_0 you can use D3D11Device1 and D3D11DeviceContext1 and 11_0 gives better compatibility with old hardware
+	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
 	hr = D3D11CreateDevice(
 		pDxgiAdapter.Get(),
 		driverType,
